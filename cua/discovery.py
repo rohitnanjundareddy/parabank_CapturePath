@@ -1,0 +1,622 @@
+"""Discovery: the LLM-driven observe -> decide -> act loop against a live surface.
+
+The only module that talks to a model at runtime (replay never does). Each
+turn: observe the page, hand the model a digest of what's on it, let it pick
+exactly one tool call, gate that call through the same PolicyEngine replay
+uses, execute it through the driver, and log everything to evidence. The
+loop ends when the model declares success (verified against the live page,
+never taken on faith), declares itself stuck (which hands the live session
+to a human and resumes on the same session), or the step budget runs out.
+
+The transcript this loop produces is NOT the artifact. recorder.py distills
+it into one afterward, dropping dead ends and freezing caller-supplied
+values into {{param}} placeholders. This module's only job is to reach the
+goal once, safely, with enough detail recorded that distillation is
+possible.
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Callable, Optional
+
+from .policy import PolicyEngine, ProposedAction, Verdict
+from .schemas import DetectorMatch, RiskLevel, Target
+
+
+# ---------------------------------------------------------------------------
+# The transcript: a raw record of one discovery attempt, pre-distillation.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TranscriptEntry:
+    """One attempted action. Only entries with ok=True survive into the
+    artifact; recorder.py is what does the dropping."""
+    tool: str
+    args: dict
+    description: str = ""
+    target: Optional[Target] = None
+    extracted: Optional[str] = None
+    ok: bool = True
+    error: Optional[str] = None
+    # Where the browser ended up once the action settled, and whether the
+    # action moved it there. The recorder turns a move into a declared
+    # wait_after, so replay proves it arrived instead of racing ahead and
+    # reading a page the browser has not rendered yet.
+    result_url: Optional[str] = None
+    url_changed: bool = False
+    # Text that was NOT on the page before this action and was after it. A
+    # legacy postback often submits to the same URL, so a URL check alone
+    # declares no wait at all and replay races the response — which is how a
+    # loan result got read off the still-showing form.
+    appeared_text: Optional[str] = None
+    # True when this click COMMITS a form. Recorded so the artifact declares
+    # the step risky, instead of leaving it to a regex over the button label.
+    submits: bool = False
+
+
+@dataclass
+class OperatorInput:
+    """A value the agent asked a human for mid-run, because neither the
+    caller nor the plan supplied it. Becomes a first-class declared input of
+    the recorded capability, described by the agent's own question."""
+    name: str
+    question: str
+    sensitive: bool = False
+
+
+@dataclass
+class DiscoveryOutcome:
+    success: bool
+    proof_text: str = ""
+    transcript: list[TranscriptEntry] = field(default_factory=list)
+    outputs: dict[str, str] = field(default_factory=dict)
+    operator_inputs: list[OperatorInput] = field(default_factory=list)
+    steps_taken: int = 0
+    escalations: int = 0
+    failure_reason: Optional[str] = None
+    # Every page state this run passed through. The run SUCCEEDED, so text
+    # that was on screen at any point during it cannot be evidence of
+    # failure — which is what hardening needs in order to throw out a
+    # detector like "'Customer Login' means the username field is missing".
+    seen_texts: list[str] = field(default_factory=list)
+    # Element texts on the page the run ended on.
+    final_texts: list[str] = field(default_factory=list)
+
+
+def _digest(observation, limit: int = 250) -> str:
+    """Render an Observation into text compact enough for the model, keyed
+    on the same 'e0', 'e1', ... refs the driver stamped onto the live DOM,
+    so a tool call's `ref` always names something that still exists.
+
+    The limit exists to bound prompt size, but it must never be the reason
+    the agent cannot see its data: a legacy account table runs to hundreds
+    of cells, and a positional cutoff silently hides whichever row the
+    caller actually asked about. Anything past the cutoff stays reachable
+    through find_elements, which searches the WHOLE observation.
+
+    Set generously on purpose. It was once tuned to a page that turned out
+    to be only partly rendered when it was measured — so the cutoff sat just
+    under the real element count, and the rows nearest the bottom of a table
+    vanished. A limit calibrated against an incomplete observation is worse
+    than no limit at all, because it looks deliberate.
+    """
+    if observation is None:
+        return "(no observation available)"
+    lines = [f"URL: {observation.url}", f"TITLE: {observation.title}", "ELEMENTS:"]
+    elements = observation.elements[:limit]
+    for el in elements:
+        bits = [f"[{el.ref}]", el.role]
+        if el.name:
+            bits.append(repr(el.name))
+        if el.value:
+            bits.append(f"value={el.value!r}")
+        lines.append("  " + " ".join(bits))
+    hidden = len(observation.elements) - len(elements)
+    if hidden > 0:
+        lines.append(f"  ... {hidden} more elements are on this page but not listed "
+                     f"here. If what you need is not above, call find_elements to "
+                     f"search all {len(observation.elements)} of them by text.")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tool surface offered to the model. One call per turn (tool_choice="any"):
+# the model always picks exactly one of these, never free-form action.
+# ---------------------------------------------------------------------------
+
+SYSTEM = """You are operating a legacy banking web application on behalf of a caller, \
+to accomplish one stated goal. You act by calling exactly one tool per turn; \
+you never act outside of a tool call.
+
+Rules:
+1. Only ever use an element ref ("e0", "e12", ...) that appears in the MOST \
+RECENT observation, or that find_elements just returned to you. Refs are \
+re-assigned on every observation; never reuse one from an earlier turn.
+1b. A long page (an account table, a transaction list) is listed only in \
+part. If the row, cell or control you need is not in the observation, call \
+find_elements with the text you are looking for — for example the account \
+number — instead of guessing a ref, working from a row that merely looks \
+similar, or giving up.
+2. Every value the caller supplied (listed below) must be typed or selected \
+EXACTLY as given, verbatim. Never invent a value, and never substitute a \
+different one for it.
+2b. To capture a LIST — several transactions, every row of a table — extract \
+the TABLE element itself, not one cell at a time. One extract reads the whole \
+table's text into one output, which is what a goal like "read the \
+transactions" is asking for. Reading cells individually cannot express a \
+list and will not satisfy such a goal.
+3. If you need a value nobody supplied, call ask_operator instead of \
+guessing or leaving a field blank.
+4. Set sensitive: true on a `type` call whenever the value being typed is a \
+credential or secret.
+5. Call declare_success only once the page genuinely shows the proof text \
+you cite. It is checked against the live page, not taken on faith.
+6. Call declare_stuck rather than repeating a blocked or failing action, \
+guessing at a workaround, or acting outside the stated goal. Getting stuck \
+and asking a human for help is always safer than improvising against a \
+bank's back office.
+7. Do only what the goal asks. Do not take extra steps "while you're here"."""
+
+TOOLS = [
+    {
+        "name": "navigate",
+        "description": "Go to a URL.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["url", "why"],
+        },
+    },
+    {
+        "name": "click",
+        "description": "Click an element from the latest observation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "description": {"type": "string",
+                                "description": "human meaning, e.g. 'Log In button'"},
+                "why": {"type": "string"},
+            },
+            "required": ["ref", "description", "why"],
+        },
+    },
+    {
+        "name": "type",
+        "description": "Type text into an input from the latest observation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "text": {"type": "string"},
+                "description": {"type": "string"},
+                "why": {"type": "string"},
+                "sensitive": {"type": "boolean",
+                             "description": "true if this value is a credential or secret"},
+            },
+            "required": ["ref", "text", "description", "why"],
+        },
+    },
+    {
+        "name": "select",
+        "description": "Choose an option in a dropdown from the latest observation.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "value": {"type": "string",
+                         "description": "the visible option label to select"},
+                "description": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["ref", "value", "description", "why"],
+        },
+    },
+    {
+        "name": "extract",
+        "description": "Read text off an element from the latest observation into a named output.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ref": {"type": "string"},
+                "output": {"type": "string",
+                          "description": "name this reading fills, e.g. 'balance'"},
+                "description": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["ref", "output", "description", "why"],
+        },
+    },
+    {
+        "name": "find_elements",
+        "description": "Search EVERY element on the current page by text, including "
+                       "the ones the observation did not list. Use this to locate a "
+                       "row, cell or control in a long table (e.g. by account number) "
+                       "and get its ref. Reads only; changes nothing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                         "description": "text to look for, e.g. an account number"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "press",
+        "description": "Press a single keyboard key, e.g. 'Enter'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"key": {"type": "string"}, "why": {"type": "string"}},
+            "required": ["key", "why"],
+        },
+    },
+    {
+        "name": "ask_operator",
+        "description": "Ask a human for a value nobody supplied. Use instead of guessing.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "snake_case parameter name"},
+                "question": {"type": "string"},
+                "sensitive": {"type": "boolean"},
+            },
+            "required": ["name", "question"],
+        },
+    },
+    {
+        "name": "declare_success",
+        "description": "Declare the goal reached. Checked against the live page before being accepted.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "proof_text": {"type": "string",
+                              "description": "text currently visible on the page proving success"},
+            },
+            "required": ["proof_text"],
+        },
+    },
+    {
+        "name": "declare_stuck",
+        "description": "Give up safely and hand the live session to a human operator.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"reason": {"type": "string"}},
+            "required": ["reason"],
+        },
+    },
+]
+
+
+class DiscoveryAgent:
+    """Runs the observe -> decide -> act loop for one discovery attempt.
+
+    The model never touches the driver directly: every proposed browser
+    action is normalized into a ProposedAction and passed through the same
+    PolicyEngine.check() replay uses, then, if allowed, executed by the
+    driver. Nothing about that gate differs for the model versus a
+    human-authored artifact at replay time.
+    """
+
+    def __init__(self, driver, policy: PolicyEngine, evidence, redactor,
+                 *, model: str, max_steps: int = 25, escalation=None,
+                 plan=None,
+                 operator_prompt: Optional[Callable[[str, str, bool], Optional[str]]] = None):
+        self.driver = driver
+        self.policy = policy
+        self.ev = evidence
+        self.redactor = redactor
+        self.model = model
+        self.max_steps = max_steps
+        self.escalation = escalation
+        self.plan = plan
+        self.operator_prompt = operator_prompt
+
+    def run(self, goal: str, url: str, params: dict, secrets: dict) -> DiscoveryOutcome:
+        import anthropic
+        client = anthropic.Anthropic()
+
+        for v in secrets.values():
+            self.redactor.register(v)
+
+        self.driver.navigate(url)
+        self.ev.event("action", tool="navigate", url=url, description="Open entry page", ok=True)
+
+        outcome = DiscoveryOutcome(success=False)
+        # Recorded as a real step, not just an evidence line: without this,
+        # the artifact has no navigate step at all and replay starts on a
+        # blank page with nowhere to go.
+        outcome.transcript.append(TranscriptEntry(
+            "navigate", {"url": url, "why": "entry point", "description": "Open entry page"},
+            description="Open entry page", ok=True))
+        messages: list[dict] = [
+            {"role": "user", "content": self._opening_prompt(goal, params, secrets)}
+        ]
+
+        for step in range(1, self.max_steps + 1):
+            shot = self.ev.screenshot_path(f"discovery_step_{step:02d}")
+            obs = self.driver.observe(screenshot_to=shot)
+            self.ev.event("observation", step=step, url=obs.url, title=obs.title)
+
+            outcome.seen_texts.append(_digest(obs))
+            # Overwritten every turn, so it ends up holding the state of the
+            # page the run finished on — the raw material for a checkpoint
+            # when the model cannot name one that is actually on screen.
+            outcome.final_texts = [el.name for el in obs.elements if el.name]
+            obs_block = {"type": "text", "text": f"OBSERVATION (step {step}):\n{_digest(obs)}"}
+            if isinstance(messages[-1]["content"], list):
+                messages[-1]["content"].append(obs_block)
+            else:
+                messages.append({"role": "user", "content": [obs_block]})
+
+            resp = client.messages.create(
+                model=self.model, max_tokens=1500, system=SYSTEM, tools=TOOLS,
+                tool_choice={"type": "any", "disable_parallel_tool_use": True},
+                messages=messages)
+            messages.append({"role": "assistant", "content": resp.content})
+            tool_uses = [b for b in resp.content if b.type == "tool_use"]
+            call = tool_uses[0]
+            # Belt and suspenders: disable_parallel_tool_use should prevent
+            # more than one, but every tool_use in an assistant turn MUST get
+            # a tool_result back or the next request is rejected outright.
+            # Only the first call is ever executed; act on one thing at a
+            # time so each decision is grounded in a fresh observation.
+            extra_results = [
+                {"type": "tool_result", "tool_use_id": b.id,
+                 "content": "Skipped: only one tool call is processed per turn.",
+                 "is_error": True}
+                for b in tool_uses[1:]
+            ]
+            tool, tool_args = call.name, dict(call.input)
+            self.ev.event("decision", step=step, tool=tool, args=tool_args)
+
+            if tool == "declare_success":
+                proof = tool_args.get("proof_text", "")
+                verified = self.driver.matches(DetectorMatch(kind="text_visible", value=proof))
+                self.ev.event("declare_success", proof=proof, verified=verified)
+                if verified:
+                    outcome.success = True
+                    outcome.proof_text = proof
+                    outcome.steps_taken = step
+                    return outcome
+                self._reply(messages, call.id,
+                           f"'{proof}' is not visible on the current page. "
+                           "The goal is not met yet; keep going, or declare_stuck "
+                           "if you cannot reach it.", is_error=True, extra=extra_results)
+                continue
+
+            if tool == "declare_stuck":
+                reason = tool_args.get("reason", "")
+                self.ev.event("stuck", reason=reason)
+                if self.escalation is None:
+                    outcome.steps_taken = step
+                    outcome.failure_reason = reason
+                    return outcome
+                outcome.escalations += 1
+                note = self.escalation.intervene(
+                    context=reason, goal=goal, step=f"step {step}",
+                    driver=self.driver, evidence=self.ev)
+                self._reply(messages, call.id,
+                           f"A human took control and reported: {note}. "
+                           "Continue from the current page state.", extra=extra_results)
+                continue
+
+            if tool == "find_elements":
+                # Searches the WHOLE observation, not the truncated digest.
+                # Pure filtering over data already captured this turn: it
+                # touches nothing, so it needs no policy gate, and the refs
+                # stay valid because the page cannot have moved.
+                query = (tool_args.get("query") or "").strip()
+                matches = [e for e in obs.elements
+                           if query.lower() in
+                           f"{e.name} {e.value or ''} {e.role}".lower()] if query else []
+                self.ev.event("action", tool="find_elements", description=query,
+                              ok=bool(matches), matches=len(matches))
+                if not matches:
+                    self._reply(messages, call.id,
+                               f"Nothing on this page matches {query!r}.",
+                               is_error=True, extra=extra_results)
+                    continue
+                listing = "\n".join(
+                    f"  [{e.ref}] {e.role} {e.name!r}"
+                    + (f" value={e.value!r}" if e.value else "")
+                    for e in matches[:40])
+                self._reply(messages, call.id,
+                           f"{len(matches)} element(s) match {query!r} on the current "
+                           f"page; these refs are valid now:\n{listing}",
+                           extra=extra_results)
+                continue
+
+            if tool == "ask_operator":
+                name = tool_args.get("name", "")
+                question = tool_args.get("question", "")
+                sensitive = bool(tool_args.get("sensitive"))
+                value = (self.operator_prompt(name, question, sensitive)
+                         if self.operator_prompt else None)
+                self.ev.event("action", tool="ask_operator", description=question,
+                              ok=value is not None)
+                if value is None:
+                    self._reply(messages, call.id,
+                               "No operator available to supply this value. "
+                               "Find another way, or declare_stuck.", is_error=True,
+                               extra=extra_results)
+                    continue
+                # Mutates the caller's dicts in place: cli.py passes the same
+                # params/secrets objects on to record(), so a value acquired
+                # here becomes a declared input of the recorded capability
+                # without any extra plumbing.
+                (secrets if sensitive else params)[name] = value
+                if sensitive:
+                    self.redactor.register(value)
+                outcome.operator_inputs.append(OperatorInput(name, question, sensitive))
+                self._reply(messages, call.id, f"Value supplied for '{name}'. Use it now.",
+                           extra=extra_results)
+                continue
+
+            # -- browser actions: navigate / click / type / select / extract / press
+            result_text, entry = self._act(tool, tool_args, obs)
+            if entry is not None:
+                outcome.transcript.append(entry)
+                if entry.ok and tool == "extract" and entry.extracted is not None:
+                    outcome.outputs[tool_args["output"]] = entry.extracted
+            self._reply(messages, call.id, result_text, is_error=entry is None or not entry.ok,
+                       extra=extra_results)
+
+        outcome.steps_taken = self.max_steps
+        outcome.failure_reason = f"max_steps ({self.max_steps}) reached without declare_success"
+        self.ev.event("max_steps_reached", max_steps=self.max_steps)
+        return outcome
+
+    # ------------------------------------------------------------------ util
+
+    def _opening_prompt(self, goal: str, params: dict, secrets: dict) -> list[dict]:
+        lines = [f"GOAL: {goal}", "", "CALLER-SUPPLIED VALUES (use verbatim; never substitute):"]
+        for k, v in params.items():
+            lines.append(f"  {k} = {v!r}")
+        for k, v in secrets.items():
+            lines.append(f"  {k} = {v!r}  [sensitive]")
+        if not params and not secrets:
+            lines.append("  (none)")
+        text = "\n".join(lines)
+        if self.plan is not None:
+            from .planner import plan_prompt_block
+            text += "\n\n" + plan_prompt_block(self.plan)
+        return [{"type": "text", "text": text}]
+
+    @staticmethod
+    def _reply(messages: list[dict], tool_use_id: str, content: str, is_error: bool = False,
+              extra: Optional[list[dict]] = None) -> None:
+        # `extra` carries tool_result stubs for any additional tool_use blocks
+        # the model issued in the same turn (see disable_parallel_tool_use).
+        # They must land in this same user message: every tool_use in an
+        # assistant turn needs a matching tool_result before the next call.
+        messages.append({"role": "user", "content": [
+            *(extra or []),
+            {"type": "tool_result", "tool_use_id": tool_use_id, "content": content,
+             "is_error": is_error},
+        ]})
+
+    def _policy_gate(self, tool: str, description: str,
+                     risk: RiskLevel = RiskLevel.SAFE):
+        """Returns (allowed, message_if_not). Identical enforcement to replay:
+        every proposed action goes through PolicyEngine.check() before the
+        driver ever sees it."""
+        decision = self.policy.check(ProposedAction(
+            tool, url=self.driver.current_url(),
+            target_description=description, risk=risk))
+        if decision.verdict == Verdict.BLOCK:
+            self.ev.event("policy_block", tool=tool, reason=decision.reason)
+            return False, f"blocked by policy: {decision.reason}"
+        if decision.verdict == Verdict.CONFIRM:
+            approved = (self.escalation.confirm(f"{tool} '{description}': {decision.reason}")
+                       if self.escalation else False)
+            self.ev.event("policy_confirm", tool=tool, reason=decision.reason, approved=approved)
+            if not approved:
+                return False, f"declined: {decision.reason}"
+        return True, None
+
+    @staticmethod
+    def _state_like(name: str) -> bool:
+        """Is this text usable as proof a page arrived? Data values change
+        between runs, so a balance or an account number is useless as a wait
+        condition even though it did just appear."""
+        n = (name or "").strip()
+        return 3 <= len(n) <= 60 and not any(ch.isdigit() for ch in n)
+
+    def _act(self, tool: str, args: dict,
+             before=None) -> tuple[str, Optional[TranscriptEntry]]:
+        """Execute one browser action. Returns (message for the model, transcript
+        entry). A policy block or confirmation decline never touches the
+        driver and produces no transcript entry: it was never attempted."""
+        why = args.get("why", "")
+        description = args.get("description", why or tool)
+
+        # Whether this click COMMITS a form has to be known BEFORE the gate,
+        # not after: the whole point is that the agent stops and asks before
+        # submitting a loan application, not that we notice afterwards. The
+        # same structural test the recorder uses, applied live.
+        ref = args.get("ref")
+        submits = bool(
+            tool == "click" and ref
+            and getattr(self.driver, "submits_ref", lambda r: False)(ref))
+
+        allowed, message = self._policy_gate(
+            tool, description,
+            risk=RiskLevel.RISKY if submits else RiskLevel.SAFE)
+        if not allowed:
+            return message, None
+
+        before_url = self.driver.current_url()
+        try:
+            target = None
+            extracted = None
+            if tool == "navigate":
+                self.driver.navigate(args["url"])
+            elif tool == "press":
+                self.driver.press(args["key"])
+            elif tool == "click":
+                target = self.driver.candidates_for_ref(ref, description)
+                self.driver.click_ref(ref)
+            elif tool == "type":
+                target = self.driver.candidates_for_ref(ref, description)
+                self.driver.type_ref(ref, args["text"])
+            elif tool == "select":
+                target = self.driver.candidates_for_ref(ref, description)
+                self.driver.select_ref(ref, args["value"])
+            elif tool == "extract":
+                target = self.driver.candidates_for_ref(ref, description)
+                extracted = self.driver.read_ref(ref)
+            else:
+                raise ValueError(f"unknown tool '{tool}'")
+            # No settle here: the driver waits after any action that can
+            # move the page, so every surface gets it identically.
+        except Exception as exc:
+            self.ev.event("action", tool=tool, description=description, ok=False)
+            return f"{tool} failed: {exc}", TranscriptEntry(
+                tool, args, description=description, ok=False, error=str(exc))
+
+        after_url = self.driver.current_url()
+
+        # What did this action put on screen that was not there before? For a
+        # same-URL postback that is the only signal replay can wait on.
+        # Only actions that can move the page get a transition wait. Typing
+        # does not: the "new text" it produces is the value just typed, and
+        # recording that as a wait means replay waits for the username — or
+        # worse, the PASSWORD — to appear as visible text on the page.
+        appeared_text = None
+        if before is not None and tool in ("click", "press", "navigate"):
+            # Poll rather than sample once. settle() can return before a
+            # postback has even started, so a single look sees the OLD page,
+            # finds nothing new, and records no wait — leaving replay to race
+            # the very transition this is supposed to pin down.
+            had = {e.name.strip() for e in before.elements if e.name}
+            deadline = time.time() + 3.0
+            while time.time() < deadline and appeared_text is None:
+                try:
+                    for el in self.driver.observe().elements:
+                        name = (el.name or "").strip()
+                        if name and name not in had and self._state_like(name):
+                            appeared_text = name
+                            break
+                except Exception:
+                    break
+                if appeared_text is None:
+                    time.sleep(0.2)
+
+        self.ev.event("action", tool=tool, description=description, ok=True,
+                      url=after_url)
+        entry = TranscriptEntry(tool, args, description=description,
+                                target=target, extracted=extracted, ok=True,
+                                result_url=after_url,
+                                url_changed=after_url != before_url,
+                                appeared_text=appeared_text,
+                                submits=submits)
+        if tool == "extract":
+            self.ev.event("extracted", output=args.get("output"))
+            return f"read: {extracted!r}", entry
+        return "ok", entry

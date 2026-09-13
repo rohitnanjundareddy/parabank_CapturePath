@@ -1,0 +1,341 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "get_recent_transactions",
+  "version": "1.0.0",
+  "name": "get_recent_transactions",
+  "description": "Log in, open the Account Activity page for account {{account_id}}, and read the first 5 transactions listed into an output named recent_transactions",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-12T02:05:23.580360Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260912-020434-78165e",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in, open the Account Activity page for account {{account_id}}, and read the first 5 transactions listed into an output named recent_transactions",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay fragment parabank_login@1.0.0 using the supplied username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Account Activity page for the specified account",
+          "action": "Locate and click the link corresponding to account_id on the Accounts Overview page to open its Account Activity page",
+          "uses": []
+        },
+        {
+          "intent": "Read the first 5 transactions listed in the Account Activity table",
+          "action": "Extract the first 5 rows from the transaction table on the Account Activity page, capturing each transaction's details (e.g. date, description, debit/credit, amount) into the recent_transactions output",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account number whose Activity page will be opened",
+          "example": "13344",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "recent_transactions"
+      ],
+      "success_signal": "The Account Activity page is displayed, showing a transaction history table with a heading such as \"Account Activity\" or \"Transaction Results\" for the specified account, and at least one transaction row is visible in the table",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [],
+    "smoke_replay": "success (smoke-20260912-020539-1d59cc)",
+    "review_notes": [
+      "s04_extract: only one locator candidate (text) — no fallback if it stops matching"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account number whose Activity page will be opened",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "recent_transactions",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The requested account_id does not appear in the Accounts Overview table — the account does not exist or does not belong to the authenticated user."
+    },
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "The username/password combination was rejected by ParaBank and login did not succeed."
+    },
+    {
+      "code": "NO_TRANSACTIONS",
+      "description": "The Account Activity page loaded successfully but the transaction table contains no rows — the account has no transaction history to return."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "d_credentials_rejected",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "ParaBank rejected the supplied credentials. Verify that username and password inputs are correct."
+          }
+        },
+        {
+          "id": "d_login_error_internal",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred and has been logged.",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal server error during login. The application may be unavailable."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Accounts Overview link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/overview.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "d_session_expired",
+          "when": {
+            "kind": "text_visible",
+            "value": "Customer Login",
+            "scope": null
+          },
+          "then": {
+            "type": "recover",
+            "remedy": "retry",
+            "dismiss_target": null,
+            "max_attempts": 2,
+            "backoff_ms": 1000
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Accounts Overview link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Accounts Overview",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"overview.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_click",
+      "description": "Account {{account_id}} link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/activity.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "d_account_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "Account {{account_id}}",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_NOT_FOUND",
+            "message": "No link matching account_id '{{account_id}}' was found in the Accounts Overview table. The account does not exist or is not accessible to this user."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "ACCOUNT_NOT_FOUND",
+        "message": "No link for account_id '{{account_id}}' exists in the Accounts Overview table. The account is absent or inaccessible for the authenticated user."
+      },
+      "action": "click",
+      "target": {
+        "description": "Account {{account_id}} link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "{{account_id}}",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "{{account_id}}||td:nth-child(1) a",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s04_extract",
+      "description": "Account Activity heading and transaction table showing first 5 transactions for account {{account_id}}",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Activity",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "d_no_transactions",
+          "when": {
+            "kind": "text_visible",
+            "value": "No transactions found.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "NO_TRANSACTIONS",
+            "message": "The Account Activity page for account '{{account_id}}' contains no transaction rows. Nothing can be extracted into recent_transactions."
+          }
+        },
+        {
+          "id": "d_activity_page_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank displayed an error on the Account Activity page. The account data could not be retrieved."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Account Activity heading and transaction table showing first 5 transactions for account {{account_id}}",
+        "candidates": [
+          {
+            "strategy": "text",
+            "value": "Account Activity",
+            "role": null,
+            "rationale": "visible text, last resort"
+          }
+        ]
+      },
+      "output": "recent_transactions",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Account Activity",
+      "scope": null
+    }
+  }
+}

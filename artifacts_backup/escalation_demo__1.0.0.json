@@ -1,0 +1,138 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "escalation_demo",
+  "version": "1.0.0",
+  "name": "escalation_demo",
+  "description": "open the Transfer Funds page and transfer 1 dollar from account 13344 to another account",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-08-26T00:24:04.356367Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260826-002246-7f2931",
+    "model": "claude-sonnet-4-6"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "Parameter observed during discovery",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "Secret. Injected at runtime, never stored.",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [],
+  "business_outcomes": [],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "navigate",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Transfer Complete!",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Transfer Complete!",
+      "scope": null
+    }
+  }
+}

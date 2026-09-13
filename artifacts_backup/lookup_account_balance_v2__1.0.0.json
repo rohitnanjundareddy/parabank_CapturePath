@@ -1,0 +1,268 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "lookup_account_balance_v2",
+  "version": "1.0.0",
+  "name": "lookup_account_balance_v2",
+  "description": "Log in with the given username and password, open Accounts Overview, and read the balance of account {{account_id}} into an output named balance",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-09T18:55:49.717294Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260909-185512-31207a",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password, open Accounts Overview, and read the balance of account {{account_id}} into an output named balance",
+      "steps": [
+        {
+          "intent": "Log in with the supplied username and password using the Customer Login form",
+          "action": "Locate the username input [e9] and password input [e10] on the entry page, enter the username and password respectively, then click the Log In button [e11].",
+          "uses": []
+        },
+        {
+          "intent": "Navigate to Accounts Overview",
+          "action": "After successful login, find and click the 'Accounts Overview' link in the post-login navigation menu.",
+          "uses": []
+        },
+        {
+          "intent": "Read the balance of the specified account",
+          "action": "On the Accounts Overview page, locate the row corresponding to account_id and read the balance value from that row, storing it as the output named 'balance'.",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to the banking application",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to the banking application",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account number whose balance should be read from the Accounts Overview page",
+          "example": "13344",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "balance"
+      ],
+      "success_signal": "The Accounts Overview page is displayed, showing a table of accounts with their balances, and a row matching account_id is present on the page.",
+      "reuse": []
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [
+      "s05_extract: detector 'det_account_not_found' rejected: 'Accounts Overview' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to the banking application",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account number whose balance should be read from the Accounts Overview page",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to the banking application",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "balance",
+      "type": "number",
+      "description": "Read from the page during discovery; a currency amount, returned as a number"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "The username or password supplied was not accepted by ParaBank. The login attempt was rejected."
+    },
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The requested account_id does not appear in the authenticated user's Accounts Overview. No balance can be returned."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/overview.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_invalid_credentials",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INVALID_CREDENTIALS",
+            "message": "Login failed: the supplied username or password was rejected by ParaBank."
+          }
+        },
+        {
+          "id": "det_login_page_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred and has been logged.",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal server error during login. Cannot proceed."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_extract",
+      "description": "Balance of account {{account_id}}",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Accounts Overview",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "ACCOUNT_NOT_FOUND",
+        "message": "No row matching account_id {{account_id}} was found in the Accounts Overview table. The account may not belong to this user."
+      },
+      "action": "extract",
+      "target": {
+        "description": "Balance of account {{account_id}}",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "{{account_id}}||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      },
+      "output": "balance",
+      "parse": "currency"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Page state proving success: The \"Accounts Overview\" heading is the fixed page title that appears on every successful login and account listing page in ParaBank. It is structural page state, not a data value, so it remains stable across all runs regardless of account balances or user data.",
+    "match": {
+      "kind": "text_visible",
+      "value": "Accounts Overview",
+      "scope": null
+    }
+  }
+}

@@ -1,0 +1,26 @@
+STILL REQUIRED — this was missed last time and every action failed.
+
+Open cua/driver.py, go to the very BOTTOM, find these lines:
+
+    PlaywrightDriver.click_ref = _click_ref
+    PlaywrightDriver.type_ref = _type_ref
+
+Paste this block immediately ABOVE them:
+------------------------------------------------------------------
+def _settle(self, timeout_ms: int = 4000) -> None:
+    """Let a navigation or postback finish before the next observation."""
+    try:
+        self._page.wait_for_load_state("domcontentloaded", timeout=timeout_ms)
+        self._page.wait_for_load_state("networkidle", timeout=timeout_ms)
+    except Exception:
+        pass
+
+PlaywrightDriver.settle = _settle
+------------------------------------------------------------------
+
+Verify with:
+    python -c "from cua.driver import PlaywrightDriver; print(hasattr(PlaywrightDriver,'settle'))"
+Must print True.
+
+Do NOT overwrite driver.py: your copy has the anchored relative_text fix
+and the add_init_script handoff hooks.

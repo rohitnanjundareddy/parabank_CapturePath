@@ -1,0 +1,158 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "lookup_account_balance",
+  "version": "1.0.0",
+  "name": "Look up account balance",
+  "description": "Logs into ParaBank, opens Accounts Overview, and returns the current balance for a given account id.",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260823-placeholder",
+    "model": "claude-sonnet-4-6"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "ParaBank username",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "ParaBank password. Injected at runtime, never stored.",
+      "required": true,
+      "sensitive": true
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "Account number to look up",
+      "required": true,
+      "example": "13344"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "balance",
+      "type": "number",
+      "description": "Current balance of the account in USD"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The account id does not appear in this user's overview. A legitimate answer, not a failure."
+    },
+    {
+      "code": "LOGIN_REJECTED",
+      "description": "Credentials were not accepted."
+    }
+  ],
+  "steps": [
+    {
+      "id": "login",
+      "action": "run_subflow",
+      "description": "Authenticate as the given user",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      },
+      "detectors": [
+        {
+          "id": "bad_creds",
+          "when": {
+            "kind": "text_visible",
+            "value": "could not be verified"
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "LOGIN_REJECTED",
+            "message": "ParaBank rejected the supplied credentials"
+          }
+        }
+      ]
+    },
+    {
+      "id": "goto_overview",
+      "action": "click",
+      "description": "Open the Accounts Overview page",
+      "target": {
+        "description": "Accounts Overview link in the left navigation",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "role": "link",
+            "value": "Accounts Overview",
+            "rationale": "Accessible role and name, most stable across styling changes"
+          },
+          {
+            "strategy": "text",
+            "value": "Accounts Overview",
+            "rationale": "Visible text fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*='overview.htm']",
+            "rationale": "Structural fallback on the href, survives text rewording"
+          }
+        ]
+      },
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Overview",
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "session_expired",
+          "when": {
+            "kind": "text_visible",
+            "value": "Please login"
+          },
+          "then": {
+            "type": "recover",
+            "remedy": "reload_and_retry",
+            "max_attempts": 1,
+            "backoff_ms": 500
+          }
+        }
+      ]
+    },
+    {
+      "id": "read_balance",
+      "action": "extract",
+      "description": "Read the balance cell in the row for the requested account",
+      "target": {
+        "description": "Balance cell in the overview row for account {{account_id}}",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "{{account_id}}||td:nth-child(2)",
+            "rationale": "Legacy table has no ids; anchor on the account number in the same row"
+          }
+        ]
+      },
+      "output": "balance",
+      "parse": "currency",
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "ACCOUNT_NOT_FOUND",
+        "message": "No row for the requested account id in Accounts Overview"
+      }
+    }
+  ],
+  "success": {
+    "id": "overview_reached",
+    "description": "Accounts Overview rendered with the balances table",
+    "match": {
+      "kind": "text_visible",
+      "value": "Account Overview"
+    }
+  }
+}

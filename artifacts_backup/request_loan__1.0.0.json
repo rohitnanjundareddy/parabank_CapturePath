@@ -1,0 +1,446 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "request_loan",
+  "version": "1.0.0",
+  "name": "request_loan",
+  "description": "Open the Request Loan page, request a loan of the given amount with the given down payment from account {{account_id}}, and read the loan request status into an output named loan_status",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-10T06:05:05.800179Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260910-060409-8726d0",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Open the Request Loan page, request a loan of the given amount with the given down payment from account {{account_id}}, and read the loan request status into an output named loan_status",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay parabank_login@1.0.0 with username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Request Loan page from the left-hand navigation menu",
+          "action": "Click the 'Request Loan' link in the authenticated navigation sidebar",
+          "uses": []
+        },
+        {
+          "intent": "Fill in the loan request form with the given loan amount, down payment, and from-account",
+          "action": "Enter loan_amount into the Loan Amount field, down_payment into the Down Payment field, and select account_id from the From Account dropdown, then submit the form",
+          "uses": []
+        },
+        {
+          "intent": "Read the loan request status from the result page into the output loan_status",
+          "action": "Capture the loan application status text displayed on the confirmation/result page into loan_status",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account ID to use as the funding source for the loan down payment",
+          "example": "13344",
+          "sensitive": false
+        },
+        {
+          "name": "loan_amount",
+          "description": "The total amount of the loan being requested",
+          "example": "1500",
+          "sensitive": false
+        },
+        {
+          "name": "down_payment",
+          "description": "The down payment amount for the loan request",
+          "example": "250",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "loan_status"
+      ],
+      "success_signal": "The loan application result page is displayed, showing a loan request status heading or result message (e.g. \"Loan Request Processed\" or \"Approved\"/\"Denied\" status label) confirming the request was submitted and evaluated",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [
+      "s07_extract: detector 'det_loan_denied' rejected: 'Denied' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one",
+      "s07_extract: detector 'det_results_page_missing' rejected: 'Loan Request Processed' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
+    "smoke_replay": "skipped: state-changing steps"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account ID to use as the funding source for the loan down payment",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "loan_amount",
+      "type": "string",
+      "description": "The total amount of the loan being requested",
+      "required": true,
+      "sensitive": false,
+      "example": "1500"
+    },
+    {
+      "name": "down_payment",
+      "type": "string",
+      "description": "The down payment amount for the loan request",
+      "required": true,
+      "sensitive": false,
+      "example": "250"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "loan_status",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "LOAN_APPROVED",
+      "description": "The loan request was evaluated and approved by the bank."
+    },
+    {
+      "code": "LOAN_DENIED",
+      "description": "The loan request was evaluated and denied by the bank (e.g. insufficient funds or credit)."
+    },
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "Login failed because the supplied username/password were not accepted."
+    },
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The requested account_id does not appear in the From Account dropdown and cannot be selected."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_login_failed",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "Login failed: the supplied credentials were rejected by ParaBank. Verify username and password inputs."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Request Loan link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/requestloan.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Request Loan link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Request Loan",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"requestloan.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_type",
+      "description": "Loan Amount field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Loan Amount field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Loan Amount: $||td:nth-child(2) input",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#amount",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{loan_amount}}",
+      "sensitive": false
+    },
+    {
+      "id": "s04_type",
+      "description": "Down Payment field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Down Payment field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Down Payment: $||td:nth-child(2) input",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#downPayment",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{down_payment}}",
+      "sensitive": false
+    },
+    {
+      "id": "s05_select",
+      "description": "From Account dropdown",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_account_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "account_id not present in From Account dropdown options",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_NOT_FOUND",
+            "message": "The account_id '{{account_id}}' was not found in the From Account dropdown. The account may not belong to this user."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "select",
+      "target": {
+        "description": "From Account dropdown",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "12456",
+            "role": "combobox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "From account #:||td:nth-child(2) select",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#fromAccountId",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{account_id}}"
+    },
+    {
+      "id": "s06_click",
+      "description": "Apply Now button",
+      "risk": "risky",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Loan Request Processed",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_session_timeout",
+          "when": {
+            "kind": "text_visible",
+            "value": "Customer Login",
+            "scope": null
+          },
+          "then": {
+            "type": "recover",
+            "remedy": "retry",
+            "dismiss_target": null,
+            "max_attempts": 2,
+            "backoff_ms": 1000
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Apply Now button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Apply Now",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s07_extract",
+      "description": "Loan request status (Denied/Approved)",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Loan Request Processed",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "det_loan_approved",
+          "when": {
+            "kind": "text_visible",
+            "value": "Approved",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "LOAN_APPROVED",
+            "message": "The loan request was approved. loan_status has been set to 'Approved'."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "LOAN_DENIED",
+        "message": "Loan status text was empty or unrecognised on the results page; treating as Denied pending manual review."
+      },
+      "action": "extract",
+      "target": {
+        "description": "Loan request status (Denied/Approved)",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Down Payment: $||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      },
+      "output": "loan_status",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Loan Request Processed",
+      "scope": null
+    }
+  }
+}

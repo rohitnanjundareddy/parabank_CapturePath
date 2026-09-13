@@ -1,0 +1,230 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "demo_balance",
+  "version": "1.0.0",
+  "name": "demo_balance",
+  "description": "Log in with the given username and password, open Accounts Overview, and read the balance of the given account into an output named balance",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-09-09T06:17:48.693853Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260909-061046-506050",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password, open Accounts Overview, and read the balance of the given account into an output named balance",
+      "steps": [
+        {
+          "intent": "Log in with the supplied username and password",
+          "action": "On the entry page, locate the Customer Login form. Enter the value of 'username' into the username input field [e9] and the value of 'password' into the password input field [e10], then click the 'Log In' button [e11].",
+          "uses": [
+            "username",
+            "password"
+          ]
+        },
+        {
+          "intent": "Navigate to Accounts Overview",
+          "action": "After successful login, locate and click the 'Accounts Overview' link in the post-login navigation menu.",
+          "uses": []
+        },
+        {
+          "intent": "Read the balance of the specified account",
+          "action": "On the Accounts Overview page, find the row corresponding to 'account_id' and read the displayed balance value into the output named 'balance'.",
+          "uses": [
+            "account_id"
+          ]
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to the banking application.",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to the banking application.",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account number whose balance is to be read from the Accounts Overview page.",
+          "example": "13344",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "balance"
+      ],
+      "success_signal": "The Accounts Overview page is displayed, showing a table of accounts with their balances, confirming the account lookup completed successfully."
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [
+      "success checkpoint '$529.10' looks like a data value rather than page state (planned signal: 'The Accounts Overview page is displayed, showing a table of accounts with their balances, confirming the account lookup completed successfully.')"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to the banking application.",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account number whose balance is to be read from the Accounts Overview page.",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to the banking application.",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "balance",
+      "type": "string",
+      "description": "Extracted during discovery (sample: '$529.10')"
+    }
+  ],
+  "business_outcomes": [],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "navigate",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_extract",
+      "description": "Balance for account 13344",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "$529.10",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Balance for account {{account_id}}",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "{{account_id}}||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      },
+      "output": "balance",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "$529.10",
+      "scope": null
+    }
+  }
+}

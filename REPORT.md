@@ -1,0 +1,101 @@
+# REPORT
+
+## 1. Architecture
+
+A single Python process with strict module boundaries rather than services: at this scale, process boundaries would add failure modes without adding capability, and every seam that matters is already an interface in code. There are two execution paths that share the same bottom half. The discovery path runs an LLM loop (observe, decide via tool use, act) and, on success, distills the transcript into an artifact. The replay path loads an artifact and executes it with no model anywhere in the process. Both paths act only through two shared components: a policy gate that checks every action before execution, and a surface driver that exposes observe and act primitives over Playwright.
+
+The design principle throughout: all intelligence happens at discovery and review time and is frozen into data; runtime only executes data. The LLM proposes single structured actions through tool calling, and my code validates, gates, executes, and records them. The model never holds the browser.
+
+The hardest lesson of this build, and the thing that shaped the final architecture, is that **discovery and replay are different enough that a successful run does not imply a replayable artifact**. Discovery targets the exact element the model pointed at, settles after every action, and adapts when it is wrong. Replay resolves a recorded locator ladder, at full speed, with no ability to adapt. Every serious bug I hit lived in that gap: an entry navigation that discovery performed for itself and therefore never recorded; waits that discovery never needed because it always settled; a locator ladder that discovery never exercised because it never used one. So the pipeline now ends by *proving* the artifact rather than asserting it:
+
+```
+goal → plan (human-approved) → LLM run → record → harden → verify against plan → SMOKE REPLAY → approve
+```
+
+The smoke replay runs the just-recorded artifact once, in a cookie-isolated browser context (clean session, not logged in), and approval is gated on it passing. Nothing reaches `approved` because a discovery run went well; it reaches `approved` because the artifact itself ran.
+
+Key trade off: I capture element targeting from the accessibility properties and structure of the live element at action time (roles, labels, row anchors) rather than using pure screenshot and coordinate control. Coordinates generalize best to desktop surfaces but are the least reviewable and least stable representation; semantic locators are reviewable in a pull request and degrade gracefully. The driver seam (section 4) is where a coordinate based implementation would slot in if a surface offers nothing better.
+
+## 2. Artifact schema
+
+The artifact is a typed capability contract, not a step list. It carries: identity and pinned semver; typed inputs (with a sensitive flag; secret values are injected at runtime and never stored); typed outputs; declared business outcomes the caller must handle; ordered steps; a success checkpoint; and provenance. Design choices worth defending:
+
+**Locator candidates, not selectors.** Every target is a ranked ladder (accessible role and name, then label, then a row anchored relative locator for id-less legacy tables, then a label-adjacency rung, then structural CSS), each rung carrying a recorded rationale. Robustness lives in the data where a reviewer can see it. Two rungs are only a real ladder if they fail *differently*, so for the dominant legacy shape — a label/value table row like `Status: | Denied` — the artifact records both `Status:||td:nth-child(2)` (count columns within the anchored row) and `td:has-text("Status:") + td` (take the cell after the label). Inserting a column breaks the first and not the second.
+
+**What is never allowed into a locator: data.** An element's `value` is a label on a button and the user's data on a text field or a `<select>`. Recording the latter produces a locator that only matches while the field still holds that value — on ParaBank's pre-filled contact form it produced `role_name: "smith"` on the Last Name field, and on a dropdown it produced `role_name: "12456"`. Both are now excluded structurally.
+
+**Declared error handling.** Steps carry detectors: a match condition mapped to exactly one of four actions: `business_outcome`, bounded `recover`, `escalate`, or `hard_failure`. The most common design mistake in this space is conflating a legitimate result such as account-not-found with a crash; here the distinction is encoded in the artifact and enforced by the result type.
+
+**Composition frozen at review time.** Capabilities reference reusable fragments (a shared login) by pinned id and version through `run_subflow` steps. Replay flattens references mechanically; it never chooses between alternatives at runtime. Selection happens at plan time, where a human reviews it. `python -m cua graph <ref>` prints the resulting dependency tree.
+
+**Provenance carries the review trail, not just the origin.** Beyond run id and model, it records the approved plan, `verification_problems` (recording vs plan), `hardening_rejected` (what the hardening model proposed and why it was thrown out), `smoke_replay` (the proof, or why there is none), and `review_notes` (non-blocking things a reviewer should look at — currently, steps with a single locator rung, which cannot degrade, only fail).
+
+**Draft and approved states.** Unattended replay requires approved status, and approval requires either a passing smoke replay or a deliberate human decision.
+
+## 3. Determinism & error handling
+
+Determinism on replay comes from: no model calls; pinned composition; explicit waits; and a final checkpoint so success is asserted, not assumed.
+
+**Waits are recorded from what the action actually did.** Discovery observes where the browser ended up and what appeared, and the recorder turns that into the step's declared `wait_after`: a `url_matches` on the *path only* (never the host, so the artifact ports to another tenant's deployment) when the action navigated, or a `text_visible` on text that appeared when it did not. That second case matters more than it sounds — legacy apps post back to the same URL constantly, and a URL check alone declares no wait at all. Replay additionally settles on load state after mutating actions, as a floor rather than a substitute: a step's declared wait is what proves it arrived.
+
+**Errors follow a fixed evaluation order.** When a step fails or its wait times out, declared detectors are consulted first; a matching detector's action wins, and bounded recovery (retry, dismiss a known interstitial, reload, each with an attempt budget) re-runs the step. If the ladder is exhausted, the step's `on_exhausted` action applies. Detectors are also checked after apparently successful steps, because legacy apps happily render an error banner inside a page that loaded fine.
+
+**The result contract has exactly three statuses**: `success` with typed outputs, `business_outcome` with a stable code and message, or `hard_failure` with the failed step, what was expected, what was observed, and a screenshot path.
+
+**An answer must be traceable to something read.** Each output carries `output_evidence`: the raw source text before parsing, which rung found it, and when. A caller can check `balance: 529.1` against `source_text: "$529.10"` without re-running the capability. Correspondingly, an extract that resolves an element but reads *nothing* is not a success — it routes through the step's declared error handling, because returning `""` hands the caller an empty answer that looks authoritative. Parsing fails loudly rather than guessing, and preserves accounting-notation negatives (`($50.00)` and `-$980.90` both become negative numbers) instead of silently dropping the sign.
+
+**Drift is a distinct signal from failure.** Per-step reports record which rung matched. A step that succeeded on a *fallback* rung is reported in `degraded_steps` with a warning: the run passed, but the preferred description of that element has stopped matching. Crucially, this counts only rungs that stopped *matching* — a rung the driver refused because it resolved the wrong kind of element (a `<td>` when the step needs to type) is a defect in the recording, not a moving page, and must not raise a false alarm.
+
+**The ladder degrades on wrong-type matches, not just misses.** Resolution takes what the caller intends to do; a rung that resolves something the action cannot be performed on is a near miss, and the ladder keeps descending. Without this, a row-anchored rung landing on the `<td>` wrapping an `<input>` wins over a perfectly good `#amount` rung below it, and replay dies with the working candidate never tried.
+
+## 4. Heterogeneity & multi tenant
+
+**Surface abstraction.** The seam is the driver protocol: observe returns a normalized element digest, act executes primitives, and detector matching plus session ownership live behind the same interface. Artifacts describe intent (click the element found by this ladder) rather than mechanism, so a legacy frameset app means a driver that walks frames during observation, and a desktop app means a driver over OS accessibility APIs where role and name locators carry over directly and coordinate candidates become the fallback rung. Engines and artifacts are untouched in both cases. The observation digest is bounded for prompt size, but bounding must never be why the agent cannot see its data — a long account table runs past any cutoff — so `find_elements` searches the *whole* observation by text and returns refs, which is how the agent reaches row 18 of a table whose first 60 elements are navigation.
+
+**Multi tenant reuse.** The store is a graph, and fragments are the built form of it: record login once as a `fragment`, prove it by replaying it, and thereafter every capability that needs a logged-in session references `parabank_login@1.0.0` by pinned version instead of rediscovering it. One fix to the fragment reaches every capability that uses it. Tenants would be modeled as overlays that override specific fragments or individual locator ladders rather than whole capabilities: two tenants on the same vendor product share the base capability; the one with a rebranded login overrides only `login@x.y.z`. This is also why declared waits assert paths and not hosts. Drift detection falls out of replay telemetry: `degraded_steps` flags a tenant whose replays are sliding down the ladder before failures start. At production scale I would lift these relationships into a queryable graph store to answer blast-radius questions; at this scale the JSON references and the `graph` command are the honest version of the same structure.
+
+## 5. Escalation & handoff
+
+Stuck is detected three ways: the discovery model explicitly declares it cannot proceed safely (prompted to prefer this over guessing), a replay detector or exhaustion declares escalate, or a state-changing action requires confirmation. An intervention request carries the goal, the step, the reason, the current URL, and a screenshot.
+
+Control transfer is enforced at the driver, which owns the session: `cede_control` marks the session human-held and installs listeners that record the human's clicks and changes; any automation action while a human holds the session raises. The human works in the same already-open browser window, signals completion, and describes what they did; the recorded actions and note enter the run's evidence; control returns; discovery re-observes and continues, or replay re-runs the step and the checkpoint still gates success. One handoff per step, so a step that fails again afterwards becomes a debuggable failure rather than a loop.
+
+**Confirmation is a different mechanism from handoff, and it is where the loan case lands.** The agent decides whether to *submit*; the bank decides whether to approve. So a control that commits a form is `risky` and always asks a human first — on both paths, during discovery as well as replay. The prompt shows what is actually being committed (the values entered into that form, secrets excluded), because a button label alone is not informed consent. Unattended runs fail closed on any such step.
+
+The operator surface is deliberately a terminal prompt: the mechanism underneath (pause, cede, record, resume, verify) is the real deliverable, and a web console would sit on exactly those calls.
+
+## 6. Safety
+
+A single policy gate sits below both execution paths, so there is no code path to the browser around it. It enforces a domain allowlist, an action type allowlist, and blocked route patterns (ParaBank's admin console and money-movement routes are blocked by default). Effective risk is the max of the declared step risk and pattern-inferred risk, so a mislabeled step cannot downgrade itself.
+
+Pattern-based risk classification is genuinely weak, and testing showed it failing in *both* directions: a loan application sailed through as SAFE because no regex covered it, and later a plain navigation link reading "Open New Account link" matched `open.*account` and turned a page change into a confirmation prompt. Those patterns were a proxy for "this control commits state", so the fix is to stop reading labels and read structure instead: a control that commits a form is detected as such (a real submit, or a button inside a form, which is how legacy apps commit via JavaScript — ParaBank's is literally `<input type="button" value="Apply Now">`), and that risk is recorded *in the artifact* at record time rather than re-derived from a regex at runtime. A reviewer can lower it deliberately; policy still takes the max, so it cannot be downgraded silently.
+
+With commits detected directly, `risky_target_patterns` is now empty: keeping a lexical proxy alongside a structural test buys nothing and costs false positives. `irreversible_target_patterns` stays, because its job is different — refusing to go somewhere at all, including by following a link, which structure cannot tell you. Irreversible actions such as fund transfers are blocked outright as out of scope. Secrets and sensitive parameters are registered with a redactor that masks them in every evidence line at write time; artifacts store placeholders rather than secret values; defensive patterns scrub SSN and card-shaped data; and a recorded wait can never reference a secret. Output samples record the *shape* of what was read, not the value, because a real balance is regulated data and the artifact is a file that gets committed and reviewed.
+
+I tried a cleaner rule first and rejected it on evidence: HTTP semantics say GET is safe and POST commits, which would be a principled signal rather than a structural guess. On ParaBank it is exactly backwards — the login form is the only `POST`, while the loan application, open-account and update-profile forms are all `GET` and submit through JavaScript handlers. In a legacy app the markup's own declared semantics are not trustworthy either, which is the whole reason the test has to be structural.
+
+One carve-out is deliberate: a form containing a password field is authentication, and submitting it establishes a session rather than committing business state. Without that, logging in would be a state change, every capability that logs in would demand a human, and unattended replay would not exist. The risky things happen after the session exists, and those are still gated.
+
+Limits worth stating plainly: the allowlist is only as good as its configuration; redaction cannot mask a secret it was never told about; the structural submit test is deliberately conservative, so a read-only search form also asks for confirmation until a reviewer lowers it; and the authentication carve-out misclassifies a *change-password* form, which contains a password field but genuinely does change state — pattern rules (`update.*profile`) and the reviewer are the backstop there, since effective risk is the max of declared and inferred.
+
+**On trusting a model to harden a recording.** An earlier version of this report listed automatic detector inference as something I had deliberately cut, on the grounds that guessing failure modes from one happy-path run was unsafe. I reversed that, because the alternative — shipping drafts with no detectors and no declared outcomes — was worse, and because the intelligence still happens at record time and freezes into data. But the original concern was correct, and the model demonstrated it repeatedly: it proposed `"Accounts Overview"` (the page's own heading) as proof an account was missing, `"Customer Login"` as proof the login form was broken, and an empty match string. Each would have turned every successful run into a false failure. So model proposals are *validated against reality* before they are applied: a detector whose text was on screen during the run that succeeded cannot be evidence of failure and is rejected, and the rejection is recorded on the artifact. The hardening model is a proposer; the validator is code.
+
+## 7. Cuts
+
+**Cut, and why:**
+
+- **A web operator console.** The terminal handoff exercises the real mechanism — pause, cede, record the human's actions, resume, verify — and a console would sit on exactly those four calls. Mocked deliberately; the seam is real.
+- **Desktop and legacy frameset drivers.** The driver protocol is the deliverable; section 4 describes what those implementations look like. Building them would have added surface area, not judgment.
+- **Turning the human's handoff actions into artifact steps.** When an operator takes over and completes a transfer by hand, those actions are recorded into evidence but do not become replayable steps — so a human-assisted discovery yields a capability that cannot replay the human's part. Verification catches this and refuses to approve it (you can see it on `transfer_demo`: three parameters reported frozen, the planned output missing). I judged translating recorded DOM click/change events into robust locator ladders to be a large piece of work with a poor robustness story, and a draft that honestly refuses approval is better than one that silently replays half a flow.
+- **The `explain` review command.** Removed rather than left dangling; static review findings are covered by `review_notes` and `hardening_rejected` on the artifact itself.
+- **Embedding-based capability matching and multi-run stability scoring.** The catalog lists typed signatures, which is the substrate for the first; `degraded_steps` is a per-run version of the second.
+- **Smoke-proving state-changing capabilities.** Verification must not itself file a second loan application, so capabilities containing a committing step skip the smoke replay, are not auto-approved, and are left for a human to approve deliberately.
+
+**Known weaknesses I would fix first:**
+
+1. **A table cell with no id can still get a thin ladder**, and an extract whose ladder misses can be reported as a business outcome by `on_exhausted` — a missed locator becoming a confident wrong answer. `review_notes` surfaces single-rung steps, but the deeper fix is to distinguish "the row is genuinely absent" from "I could not find the row" before mapping to an outcome.
+2. **Hardening attaches detectors to whatever steps exist**, which on a thin recording means piling transfer-related detectors onto the entry navigation. They are harmless (the text never matches) but they are noise in a reviewable artifact.
+3. **Cross-tenant overlays are designed, not built** — the fragment layer is the substrate, and the next step is demonstrating one artifact against two ParaBank variants with a single overridden fragment.
+4. **Assisted fallback**: a single-step, policy-checked LLM recovery on replay failure, recorded as evidence and never open-ended.
+5. **Evidence-backed verification of outputs**: `output_evidence` records the source text, but nothing yet asserts that a returned value is derivable from it, or reconciles multi-value reads (totals against line items). That is the substrate for the regression corpus described next.
+6. **A golden corpus**: saved page snapshots with human-validated expected extractions, replayed as regression tests, so recording quality is measured rather than discovered in production.

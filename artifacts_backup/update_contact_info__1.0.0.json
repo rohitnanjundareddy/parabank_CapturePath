@@ -1,0 +1,717 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "update_contact_info",
+  "version": "1.0.0",
+  "name": "update_contact_info",
+  "description": "Log in, open Update Contact Info, CLEAR each contact field and type the supplied value into it (first name, last name, address, city, state, zip, phone), submit, and read the confirmation message",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-06T22:47:46.653243Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260906-224619-262a77",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in, open Update Contact Info, CLEAR each contact field and type the supplied value into it (first name, last name, address, city, state, zip, phone), submit, and read the confirmation message",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials",
+          "action": "Enter the username into the username field and the password into the password field, then click the 'Log In' button",
+          "uses": [
+            "username",
+            "password"
+          ]
+        },
+        {
+          "intent": "Navigate to the Update Contact Info page",
+          "action": "Click the 'Update Contact Info' link in the authenticated user's navigation menu",
+          "uses": []
+        },
+        {
+          "intent": "Clear the First Name field and type the supplied first name",
+          "action": "Clear the existing value in the First Name input field, then type the supplied first name value",
+          "uses": [
+            "first_name"
+          ]
+        },
+        {
+          "intent": "Clear the Last Name field and type the supplied last name",
+          "action": "Clear the existing value in the Last Name input field, then type the supplied last name value",
+          "uses": [
+            "last_name"
+          ]
+        },
+        {
+          "intent": "Clear the Address field and type the supplied address",
+          "action": "Clear the existing value in the Address input field, then type the supplied address value",
+          "uses": [
+            "address"
+          ]
+        },
+        {
+          "intent": "Clear the City field and type the supplied city",
+          "action": "Clear the existing value in the City input field, then type the supplied city value",
+          "uses": [
+            "city"
+          ]
+        },
+        {
+          "intent": "Clear the State field and type the supplied state",
+          "action": "Clear the existing value in the State input field, then type the supplied state value",
+          "uses": [
+            "state"
+          ]
+        },
+        {
+          "intent": "Clear the Zip Code field and type the supplied zip",
+          "action": "Clear the existing value in the Zip Code input field, then type the supplied zip value",
+          "uses": [
+            "zip"
+          ]
+        },
+        {
+          "intent": "Clear the Phone Number field and type the supplied phone",
+          "action": "Clear the existing value in the Phone Number input field, then type the supplied phone value",
+          "uses": [
+            "phone"
+          ]
+        },
+        {
+          "intent": "Submit the Update Contact Info form",
+          "action": "Click the 'Update Profile' (or equivalent submit) button to save the contact information",
+          "uses": []
+        },
+        {
+          "intent": "Read and return the confirmation message displayed after submission",
+          "action": "Capture the confirmation heading or message text shown on the resulting page",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to the banking application",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to the banking application",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "first_name",
+          "description": "The new first name to enter in the contact info form",
+          "example": "John",
+          "sensitive": false
+        },
+        {
+          "name": "last_name",
+          "description": "The new last name to enter in the contact info form",
+          "example": "Smith",
+          "sensitive": false
+        },
+        {
+          "name": "address",
+          "description": "The new street address to enter in the contact info form",
+          "example": "123 Main St",
+          "sensitive": false
+        },
+        {
+          "name": "city",
+          "description": "The new city to enter in the contact info form",
+          "example": "Springfield",
+          "sensitive": false
+        },
+        {
+          "name": "state",
+          "description": "The new state to enter in the contact info form",
+          "example": "IL",
+          "sensitive": false
+        },
+        {
+          "name": "zip",
+          "description": "The new ZIP/postal code to enter in the contact info form",
+          "example": "62701",
+          "sensitive": false
+        },
+        {
+          "name": "phone",
+          "description": "The new phone number to enter in the contact info form",
+          "example": "555-867-5309",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "confirmation_message"
+      ],
+      "success_signal": "A confirmation heading or message (e.g. \"Profile Updated\" or \"Your updated address and phone number have been added to the system\") is displayed on the page after form submission"
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": []
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to the banking application",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "first_name",
+      "type": "string",
+      "description": "The new first name to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "John"
+    },
+    {
+      "name": "last_name",
+      "type": "string",
+      "description": "The new last name to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "Smith"
+    },
+    {
+      "name": "address",
+      "type": "string",
+      "description": "The new street address to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "123 Main St"
+    },
+    {
+      "name": "city",
+      "type": "string",
+      "description": "The new city to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "Springfield"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "description": "The new state to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "IL"
+    },
+    {
+      "name": "zip",
+      "type": "string",
+      "description": "The new ZIP/postal code to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "62701"
+    },
+    {
+      "name": "phone",
+      "type": "string",
+      "description": "The new phone number to enter in the contact info form",
+      "required": true,
+      "sensitive": false,
+      "example": "555-867-5309"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to the banking application",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "confirmation_message",
+      "type": "string",
+      "description": "Extracted during discovery (sample: 'Update Profile')"
+    }
+  ],
+  "business_outcomes": [],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "navigate",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_click",
+      "description": "Update Contact Info link",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Update Contact Info link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Update Contact Info",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"updateprofile.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s06_type",
+      "description": "First Name input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "First Name input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "{{username}}",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "First Name:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.firstName",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.firstName\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{first_name}}",
+      "sensitive": false
+    },
+    {
+      "id": "s07_type",
+      "description": "Last Name input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Last Name input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "smith",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "Last Name:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.lastName",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.lastName\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{last_name}}",
+      "sensitive": false
+    },
+    {
+      "id": "s08_type",
+      "description": "Address input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Address input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "154 e polk",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "Address:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.address\\.street",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.address.street\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{address}}",
+      "sensitive": false
+    },
+    {
+      "id": "s09_type",
+      "description": "City input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "City input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "{{city}}",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "City:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.address\\.city",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{city}}",
+      "sensitive": false
+    },
+    {
+      "id": "s10_type",
+      "description": "State input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "State input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "illinos",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "State:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.address\\.state",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.address.state\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{state}}",
+      "sensitive": false
+    },
+    {
+      "id": "s11_type",
+      "description": "Zip Code input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Zip Code input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "{{zip}}",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "Zip Code:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.address\\.zipCode",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.address.zipCode\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{zip}}",
+      "sensitive": false
+    },
+    {
+      "id": "s12_type",
+      "description": "Phone number input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Phone number input field",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "3125392733",
+            "role": "textbox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "Phone #:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.phoneNumber",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{phone}}",
+      "sensitive": false
+    },
+    {
+      "id": "s13_click",
+      "description": "Update Profile submit button",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Update Profile submit button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Update Profile",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s14_extract",
+      "description": "Confirmation heading after profile update",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Profile Updated",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Confirmation heading after profile update",
+        "candidates": [
+          {
+            "strategy": "text",
+            "value": "Update Profile",
+            "role": null,
+            "rationale": "visible text, last resort"
+          }
+        ]
+      },
+      "output": "confirmation_message",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Profile Updated",
+      "scope": null
+    }
+  }
+}

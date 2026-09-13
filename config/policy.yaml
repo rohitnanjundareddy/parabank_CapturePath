@@ -1,0 +1,53 @@
+# Policy for the ParaBank target. This file is the safety contract:
+# the agent cannot act outside what is declared here.
+
+allowed_domains:
+  - "localhost"
+  - "127.0.0.1"
+  - "parabank.parasoft.com"
+
+allowed_actions:
+  - navigate
+  - click
+  - type
+  - select
+  - extract
+  - press
+
+# Routes the agent must never touch even on allowed domains.
+blocked_url_patterns:
+  - "/admin\\.htm"
+  - "/shutdown"
+  - "/transfer\\.htm"
+  - "/billpay\\.htm"
+
+# Target-description patterns used to infer risk when a step is not
+# explicitly flagged. Matched case-insensitively against the element's
+# human description.
+#
+# Deliberately EMPTY. These were a proxy for "this control commits state",
+# and the proxy failed in both directions: a loan application matched none
+# of them and went through unconfirmed, while a navigation link reading
+# "Open New Account link" matched `open.*account` and turned a page change
+# into a state change. Commits are now detected structurally at record time
+# (a real submit, or a button inside a non-authentication form) and the
+# verdict is frozen into the artifact where a reviewer can see and adjust
+# it. Effective risk is still max(declared, inferred), so anything added
+# back here can only tighten, never loosen.
+#
+# NOTE: this backstop only protects artifacts recorded WITH structural
+# detection. An artifact recorded before it carries risk=safe on its
+# submits — which is why the shipped artifacts are recorded with current code.
+risky_target_patterns: []
+
+irreversible_target_patterns:
+  - "transfer"
+  - "pay.*bill"
+  - "delete"
+
+# How each risk class is handled.
+#   risky: confirm  -> pause and require human confirmation
+#   irreversible: block -> refuse outright (out of scope for this system)
+risk_handling:
+  risky: confirm
+  irreversible: block

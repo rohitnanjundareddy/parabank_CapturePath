@@ -1,0 +1,241 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "read_total_balance",
+  "version": "1.0.0",
+  "name": "read_total_balance",
+  "description": "Open Accounts Overview and read the Total row into an output named total_balance",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-10T05:51:42.938629Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260910-055103-5a6074",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Open Accounts Overview and read the Total row into an output named total_balance",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay fragment parabank_login@1.0.0 using the supplied username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Read the Total row from the Accounts Overview table",
+          "action": "Locate the Total row at the bottom of the accounts table and capture its balance value into the output total_balance",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        }
+      ],
+      "outputs": [
+        "total_balance"
+      ],
+      "success_signal": "The Accounts Overview page is displayed with a Total row visible at the bottom of the accounts table",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [
+      "s02_click: detector 'accounts_overview_link_missing' rejected: 'Accounts Overview' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
+    "smoke_replay": "success (smoke-20260910-055157-4e8bee)"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "total_balance",
+      "type": "number",
+      "description": "Read from the page during discovery; a currency amount, returned as a number"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "The supplied username/password were rejected by ParaBank; the user cannot be authenticated."
+    },
+    {
+      "code": "NO_ACCOUNTS_FOUND",
+      "description": "Authentication succeeded but the customer has no accounts, so the accounts table contains no data rows and no Total row to read."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "login_invalid_credentials",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INVALID_CREDENTIALS",
+            "message": "ParaBank rejected the supplied credentials. Verify username and password and retry."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Accounts Overview link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/overview.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Accounts Overview link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Accounts Overview",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"overview.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_extract",
+      "description": "Total balance value from the Total row at the bottom of the accounts table",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Accounts Overview",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "no_accounts_total_row_missing",
+          "when": {
+            "kind": "text_visible",
+            "value": "No accounts found",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "NO_ACCOUNTS_FOUND",
+            "message": "The accounts table returned no rows; there is no Total balance to extract for this customer."
+          }
+        },
+        {
+          "id": "accounts_table_load_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "The accounts table reported an error while loading. The back-office service may be unavailable; check application logs."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "NO_ACCOUNTS_FOUND",
+        "message": "The Total row was not present in the accounts table. The customer may have no accounts associated with this login."
+      },
+      "action": "extract",
+      "target": {
+        "description": "Total balance value from the Total row at the bottom of the accounts table",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Total||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      },
+      "output": "total_balance",
+      "parse": "currency"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Page state proving success: The heading \"Accounts Overview\" is rendered as the page/section title every time the accounts table is successfully loaded, regardless of the actual balance figures shown. It is stable page state, not a data value.",
+    "match": {
+      "kind": "text_visible",
+      "value": "Accounts Overview",
+      "scope": null
+    }
+  }
+}

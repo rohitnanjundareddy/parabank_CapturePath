@@ -1,0 +1,96 @@
+Two edits to cua/cli.py. Nothing else changes.
+
+===================================================================
+EDIT 1 — imports, near the other `from .` lines at the top:
+
+    from .harden import harden
+
+===================================================================
+EDIT 2 — in the `discover` command.
+
+(a) Add these two options to the signature, next to `plan`:
+
+    harden_draft: bool = typer.Option(
+        True, "--harden/--no-harden",
+        help="Have the model supply the checkpoint and error handling the "
+             "happy-path recording could not observe"),
+    auto_approve: bool = typer.Option(
+        True, "--auto-approve/--no-auto-approve",
+        help="Approve the draft automatically when verification is clean"),
+
+(b) FIND this block (it currently sits right after `artifact = record(...)`
+    and the plan-verification section):
+
+        if approved_plan is not None:
+            artifact.provenance.approved_plan = approved_plan.model_dump()
+            artifact.provenance.plan_approved_by = "operator"
+            problems = verify_against_plan(artifact, approved_plan)
+            artifact.provenance.verification_problems = problems
+            if problems:
+                typer.echo("\nRECORDING DOES NOT MATCH THE APPROVED PLAN:")
+                for pr in problems:
+                    typer.echo(f"  - {pr}")
+                typer.echo("Fix these in the draft before approving it.\n")
+                ev.event("plan_verification_failed", problems=problems)
+            else:
+                ev.event("plan_verification_passed")
+        path = ArtifactStore().save(artifact)
+
+REPLACE it with:
+
+        # Hardening first: the recording is deficient in ways that are known
+        # in advance (a checkpoint asserting data, no detectors, no declared
+        # outcomes), so fix those before judging the recording against the
+        # plan. Otherwise verification reports problems the system was always
+        # going to correct itself.
+        if harden_draft:
+            import anthropic
+            typer.echo("\nHardening the draft...")
+            try:
+                artifact, applied = harden(
+                    anthropic.Anthropic(), model, artifact, goal,
+                    log=lambda kind, **kw: ev.event(kind, **kw))
+                for line in applied:
+                    typer.echo(f"  + {line}")
+                if not applied:
+                    typer.echo("  (nothing to add)")
+                ev.event("hardening_applied", changes=applied)
+            except Exception as exc:
+                # Hardening is an improvement, not a precondition. A failure
+                # here leaves a plain draft rather than losing the run.
+                typer.echo(f"  hardening failed ({exc}); draft left as recorded")
+                ev.event("hardening_failed", error=str(exc))
+
+        if approved_plan is not None:
+            artifact.provenance.approved_plan = approved_plan.model_dump()
+            artifact.provenance.plan_approved_by = "operator"
+            problems = verify_against_plan(artifact, approved_plan)
+            artifact.provenance.verification_problems = problems
+            if problems:
+                typer.echo("\nRECORDING DOES NOT MATCH THE APPROVED PLAN:")
+                for pr in problems:
+                    typer.echo(f"  - {pr}")
+                ev.event("plan_verification_failed", problems=problems)
+            else:
+                ev.event("plan_verification_passed")
+
+        if auto_approve and not artifact.provenance.verification_problems:
+            from .schemas import ApprovalStatus
+            artifact.status = ApprovalStatus.APPROVED
+            artifact.provenance.plan_approved_by = (
+                artifact.provenance.plan_approved_by or "operator")
+            typer.echo("\nVerification clean: artifact approved automatically.")
+            typer.echo("Risky steps still require confirmation on every replay.")
+            ev.event("auto_approved")
+
+        path = ArtifactStore().save(artifact)
+===================================================================
+
+After this, the normal path is:
+
+    python -m cua discover "..." --url ... --id ... --input ... --secret ...
+    python -m cua replay <id>@1.0.0 --input ... --secret ...
+
+with no JSON editing in between. Use --no-harden or --no-auto-approve when you
+want the old behaviour, and `python -m cua explain <ref>` any time you want to
+see what the hardening produced.

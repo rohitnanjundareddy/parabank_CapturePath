@@ -1,0 +1,360 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "open_savings_account",
+  "version": "1.0.0",
+  "name": "open_savings_account",
+  "description": "Log in with the given username and password, open the Open New Account page, choose account type SAVINGS, choose account 13344 as the source of the minimum deposit, click Open New Account, and read the new account number from the confirmation into an output named new_account_id",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-09-06T01:50:30.241587Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260906-014930-79fa69",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password, open the Open New Account page, choose account type SAVINGS, choose account 13344 as the source of the minimum deposit, click Open New Account, and read the new account number from the confirmation into an output named new_account_id",
+      "steps": [
+        {
+          "intent": "Log in with the supplied username and password",
+          "action": "Enter the username into the username input field [e9], enter the password into the password input field [e10], and click the 'Log In' button [e11]",
+          "uses": [
+            "username",
+            "password"
+          ]
+        },
+        {
+          "intent": "Navigate to the Open New Account page",
+          "action": "Click the 'Open New Account' link in the authenticated navigation menu",
+          "uses": []
+        },
+        {
+          "intent": "Select SAVINGS as the account type",
+          "action": "In the account type dropdown, select the 'SAVINGS' option",
+          "uses": []
+        },
+        {
+          "intent": "Select the source account for the minimum deposit",
+          "action": "In the existing account dropdown, select the account matching account_id (13344)",
+          "uses": [
+            "account_id"
+          ]
+        },
+        {
+          "intent": "Submit the new account request",
+          "action": "Click the 'Open New Account' button to submit the form",
+          "uses": []
+        },
+        {
+          "intent": "Read the new account number from the confirmation page into the output new_account_id",
+          "action": "Locate the account number displayed in the confirmation section and capture its value as new_account_id",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The existing account number to use as the source of the minimum deposit when opening the new account",
+          "example": "13344",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "new_account_id"
+      ],
+      "success_signal": "A confirmation page is displayed with a heading or message such as 'Account Opened!' or 'Congratulations, your account is now open', and a new account number is visible on the page"
+    },
+    "plan_approved_by": "operator"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "Parameter observed during discovery",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "Parameter observed during discovery",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "Secret. Injected at runtime, never stored.",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "new_account_id",
+      "type": "string",
+      "description": "Extracted during discovery (sample: 'CHECKING\n        \n          SAVINGS')"
+    }
+  ],
+  "business_outcomes": [],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "navigate",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_click",
+      "description": "Open New Account link",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Open New Account link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Open New Account",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"openaccount.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s06_select",
+      "description": "Account type dropdown",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "select",
+      "target": {
+        "description": "Account type dropdown",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "CHECKING\nSAVINGS",
+            "role": "combobox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "#type",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "SAVINGS"
+    },
+    {
+      "id": "s07_select",
+      "description": "Existing account dropdown for minimum deposit source",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "select",
+      "target": {
+        "description": "Existing account dropdown for minimum deposit source",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "12345\n12456\n12567\n12678\n12789\n12900\n13011\n13122\n13233\n{{account_id}}\n",
+            "role": "combobox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "#fromAccountId",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{account_id}}"
+    },
+    {
+      "id": "s08_click",
+      "description": "Open New Account button",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Open New Account button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Open New Account",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s09_extract",
+      "description": "New account number link '14232' in the confirmation page",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Opened!",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "New account number link '14232' in the confirmation page",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "CHECKING\n        \n          SAVINGS",
+            "role": "combobox",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "#type",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "output": "new_account_id",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Account Opened!",
+      "scope": null
+    }
+  }
+}

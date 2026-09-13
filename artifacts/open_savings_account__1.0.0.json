@@ -1,0 +1,400 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "open_savings_account",
+  "version": "1.0.0",
+  "name": "open_savings_account",
+  "description": "Log in, open the Open New Account page, choose account type SAVINGS, fund it from account {{account_id}}, submit, and read the new account number into an output named new_account_id",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-11T00:26:19.164313Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260911-002419-e3bc9a",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in, open the Open New Account page, choose account type SAVINGS, fund it from account {{account_id}}, submit, and read the new account number into an output named new_account_id",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay fragment parabank_login@1.0.0 using username and password parameters",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Open New Account page",
+          "action": "Click the 'Open New Account' link in the left-hand navigation menu",
+          "uses": []
+        },
+        {
+          "intent": "Select SAVINGS as the account type",
+          "action": "In the account type dropdown, select the 'SAVINGS' option",
+          "uses": []
+        },
+        {
+          "intent": "Select the funding source account",
+          "action": "In the funding account dropdown, select the account matching account_id",
+          "uses": []
+        },
+        {
+          "intent": "Submit the new account form",
+          "action": "Click the 'Open New Account' submit button",
+          "uses": []
+        },
+        {
+          "intent": "Read the new account number from the confirmation page into the output new_account_id",
+          "action": "Locate and extract the account number displayed in the confirmation/success section of the page and store it as new_account_id",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The existing account ID used to fund the new savings account",
+          "example": "13344",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "new_account_id"
+      ],
+      "success_signal": "A confirmation page is displayed with a heading such as 'Account Opened!' or 'Congratulations, your account is now open' and the new account number is visible on the page",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [],
+    "smoke_replay": "skipped: state-changing steps",
+    "review_notes": [
+      "s03_select: only one locator candidate (css) — no fallback if it stops matching",
+      "s04_select: only one locator candidate (css) — no fallback if it stops matching",
+      "s05_click: only one locator candidate (role_name) — no fallback if it stops matching",
+      "s06_extract: only one locator candidate (css) — no fallback if it stops matching"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The existing account ID used to fund the new savings account",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "new_account_id",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "The supplied username/password were not accepted by ParaBank; login cannot proceed."
+    },
+    {
+      "code": "FUNDING_ACCOUNT_NOT_FOUND",
+      "description": "The requested funding account_id does not appear in the dropdown; the account does not exist or does not belong to this user."
+    },
+    {
+      "code": "ACCOUNT_OPEN_FAILED",
+      "description": "ParaBank rejected the new-account request and returned an error rather than a confirmation page."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_login_credentials_rejected",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "Login failed: ParaBank could not verify the supplied credentials. Check username and password."
+          }
+        },
+        {
+          "id": "det_login_error_generic",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal error during login. The application may be unavailable."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Open New Account link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/openaccount.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Open New Account link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Open New Account",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"openaccount.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_select",
+      "description": "Account type dropdown",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "select",
+      "target": {
+        "description": "Account type dropdown",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#type",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "SAVINGS"
+    },
+    {
+      "id": "s04_select",
+      "description": "Funding account dropdown",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_funding_account_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "account_id",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "FUNDING_ACCOUNT_NOT_FOUND",
+            "message": "The funding account {{account_id}} was not present in the dropdown. It may not exist or may not belong to this user."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "select",
+      "target": {
+        "description": "Funding account dropdown",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#fromAccountId",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{account_id}}"
+    },
+    {
+      "id": "s05_click",
+      "description": "Open New Account submit button",
+      "risk": "risky",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Opened!",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_account_open_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error opening account",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_OPEN_FAILED",
+            "message": "ParaBank returned an error when attempting to open the new savings account. The request was rejected."
+          }
+        },
+        {
+          "id": "det_submit_internal_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal error when submitting the new-account form. The application may be in a bad state."
+          }
+        },
+        {
+          "id": "det_submit_timeout",
+          "when": {
+            "kind": "text_visible",
+            "value": "Request Timeout",
+            "scope": null
+          },
+          "then": {
+            "type": "recover",
+            "remedy": "retry",
+            "dismiss_target": null,
+            "max_attempts": 2,
+            "backoff_ms": 1000
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Open New Account submit button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Open New Account",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s06_extract",
+      "description": "New account number link on the confirmation page",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Opened!",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "ACCOUNT_OPEN_FAILED",
+        "message": "No new account number link was found on the confirmation page; the account may not have been created successfully."
+      },
+      "action": "extract",
+      "target": {
+        "description": "New account number link on the confirmation page",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#type",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "output": "new_account_id",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Account Opened!",
+      "scope": null
+    }
+  }
+}

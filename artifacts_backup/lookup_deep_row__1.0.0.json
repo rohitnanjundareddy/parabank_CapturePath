@@ -1,0 +1,343 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "lookup_deep_row",
+  "version": "1.0.0",
+  "name": "lookup_deep_row",
+  "description": "Log in and read the balance of account {{account_id}} into an output named balance",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-09T23:04:25.590692Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260909-230344-f12518",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in and read the balance of account {{account_id}} into an output named balance",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay reusable fragment parabank_login@1.0.0 using the supplied username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the account detail page for the specified account_id",
+          "action": "Click or follow the link corresponding to account {{account_id}} on the Accounts Overview page",
+          "uses": []
+        },
+        {
+          "intent": "Read the current balance displayed on the account detail page into the output named 'balance'",
+          "action": "Extract the balance value shown on the account detail page and record it as the output 'balance'",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account number whose balance is to be read",
+          "example": "54321",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "balance"
+      ],
+      "success_signal": "The account detail page is displayed showing the account number heading and a labelled balance field (e.g. \"Balance:\" or \"Available Balance:\" label is present on the page)",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": []
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account number whose balance is to be read",
+      "required": true,
+      "sensitive": false,
+      "example": "54321"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "balance",
+      "type": "number",
+      "description": "Read from the page during discovery; a currency amount, returned as a number"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "The username or password supplied was rejected by ParaBank; the user cannot be authenticated."
+    },
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The requested account_id does not exist or is not associated with the authenticated user."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_app_unavailable",
+          "when": {
+            "kind": "text_visible",
+            "value": "HTTP Status 503",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank application is unavailable (HTTP 503). Check that the server is running before retrying."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/overview.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_invalid_credentials",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INVALID_CREDENTIALS",
+            "message": "Login failed: the supplied username/password was rejected by ParaBank."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_click",
+      "description": "Account {{account_id}} link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/activity.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_account_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "Account not found",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_NOT_FOUND",
+            "message": "The account link was not present or the account detail page reported the account could not be found."
+          }
+        },
+        {
+          "id": "det_page_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal error while loading the account detail page. Investigate server logs."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Account {{account_id}} link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "{{account_id}}",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "relative_text",
+            "value": "{{account_id}}||td:nth-child(1) a",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"activity.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s06_extract",
+      "description": "Balance value for account {{account_id}}",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Details",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "ACCOUNT_NOT_FOUND",
+        "message": "The balance value could not be extracted from the account detail page — the account row was not rendered."
+      },
+      "action": "extract",
+      "target": {
+        "description": "Balance value for account {{account_id}}",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Balance:||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "#balance",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "output": "balance",
+      "parse": "currency"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Page state proving success: The \"Account Details\" heading appears on every successful account detail page in ParaBank regardless of the actual balance value, making it a stable page-state signal rather than a data value that changes between runs.",
+    "match": {
+      "kind": "text_visible",
+      "value": "Account Details",
+      "scope": null
+    }
+  }
+}

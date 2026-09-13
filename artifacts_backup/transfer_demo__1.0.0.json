@@ -1,0 +1,294 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "transfer_demo",
+  "version": "1.0.0",
+  "name": "transfer_demo",
+  "description": "Open the Transfer Funds page and transfer 100 dollars from account 13344 to account 13566",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-09-10T00:08:24.078425Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260910-000549-d9bd25",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Open the Transfer Funds page and transfer 100 dollars from account 13344 to account 13566",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay parabank_login@1.0.0 using the supplied username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Transfer Funds page",
+          "action": "Click the 'Transfer Funds' link in the authenticated navigation menu",
+          "uses": []
+        },
+        {
+          "intent": "Fill in the transfer form: enter the amount, select the from-account and the to-account, then submit",
+          "action": "Set the amount field to the supplied transfer_amount, select from_account_id as the source account, select to_account_id as the destination account, and click the Transfer button",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "from_account_id",
+          "description": "The account number to transfer funds from",
+          "example": "13344",
+          "sensitive": false
+        },
+        {
+          "name": "to_account_id",
+          "description": "The account number to transfer funds to",
+          "example": "13566",
+          "sensitive": false
+        },
+        {
+          "name": "transfer_amount",
+          "description": "The dollar amount to transfer",
+          "example": "100",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "transfer_confirmation_message"
+      ],
+      "success_signal": "A confirmation heading or message such as \"Transfer Complete!\" is displayed on the page after the transfer is submitted",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [
+      "parameter 'from_account_id' was planned as an input but no recorded step references it — it is frozen as a constant",
+      "parameter 'to_account_id' was planned as an input but no recorded step references it — it is frozen as a constant",
+      "parameter 'transfer_amount' was planned as an input but no recorded step references it — it is frozen as a constant",
+      "planned output 'transfer_confirmation_message' is not produced by the recording"
+    ],
+    "hardening_rejected": [],
+    "smoke_replay": null
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "Parameter supplied per invocation",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "from_account_id",
+      "type": "string",
+      "description": "The account number to transfer funds from",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "to_account_id",
+      "type": "string",
+      "description": "The account number to transfer funds to",
+      "required": true,
+      "sensitive": false,
+      "example": "13566"
+    },
+    {
+      "name": "transfer_amount",
+      "type": "string",
+      "description": "The dollar amount to transfer",
+      "required": true,
+      "sensitive": false,
+      "example": "100"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [],
+  "business_outcomes": [
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "One or both of the specified accounts do not exist or are not accessible to the authenticated user."
+    },
+    {
+      "code": "INSUFFICIENT_FUNDS",
+      "description": "The source account does not have sufficient funds to cover the requested transfer amount."
+    },
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "The username or password supplied was not accepted by ParaBank and the user could not be logged in."
+    },
+    {
+      "code": "INVALID_AMOUNT",
+      "description": "The transfer amount supplied is zero, negative, or otherwise not accepted by the application."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_login_failed",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "ParaBank rejected the supplied credentials. Verify username and password inputs and retry with correct values."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Transfer Complete!",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "det_app_unavailable",
+          "when": {
+            "kind": "text_visible",
+            "value": "HTTP Status 503",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank returned HTTP 503 on navigation. The application server may be down or unreachable; investigate infrastructure before retrying."
+          }
+        },
+        {
+          "id": "det_page_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "HTTP Status 404",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "The ParaBank entry page returned 404. The base URL or deployment path may be misconfigured."
+          }
+        },
+        {
+          "id": "det_transfer_from_account_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred and has been logged.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_NOT_FOUND",
+            "message": "ParaBank reported an internal error when attempting the transfer, most likely because the from_account_id or to_account_id does not exist or is not owned by this user."
+          }
+        },
+        {
+          "id": "det_insufficient_funds",
+          "when": {
+            "kind": "text_visible",
+            "value": "insufficient funds",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INSUFFICIENT_FUNDS",
+            "message": "The source account (from_account_id) does not have enough funds to cover the requested transfer_amount."
+          }
+        },
+        {
+          "id": "det_invalid_amount",
+          "when": {
+            "kind": "text_visible",
+            "value": "Please enter a valid amount",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INVALID_AMOUNT",
+            "message": "The transfer amount was rejected by ParaBank. Ensure transfer_amount is a positive number greater than zero."
+          }
+        },
+        {
+          "id": "det_session_timeout",
+          "when": {
+            "kind": "text_visible",
+            "value": "Your session has timed out.",
+            "scope": null
+          },
+          "then": {
+            "type": "recover",
+            "remedy": "retry",
+            "dismiss_target": null,
+            "max_attempts": 2,
+            "backoff_ms": 1000
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Transfer Complete!",
+      "scope": null
+    }
+  }
+}

@@ -1,0 +1,266 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "smoke_check",
+  "version": "1.0.0",
+  "name": "smoke_check",
+  "description": "Open Accounts Overview and read the Total row into an output named total_balance",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-10T19:12:20.299267Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260910-191145-ed98ad",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Open Accounts Overview and read the Total row into an output named total_balance",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay fragment parabank_login@1.0.0 using the supplied username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Read the Total row from the Accounts Overview table into the output total_balance",
+          "action": "Locate the Total row at the bottom of the accounts table on the Accounts Overview page and capture its balance value as total_balance",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        }
+      ],
+      "outputs": [
+        "total_balance"
+      ],
+      "success_signal": "The Accounts Overview page is displayed and a Total row is visible at the bottom of the accounts table",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [
+      "s03_extract: detector 'det_no_total_row' rejected: 'Accounts Overview' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
+    "smoke_replay": "success (smoke-20260910-191234-88fe7b)"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "total_balance",
+      "type": "number",
+      "description": "Read from the page during discovery; a currency amount, returned as a number"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "LOGIN_FAILED",
+      "description": "The supplied credentials were rejected by ParaBank; the user cannot be authenticated."
+    },
+    {
+      "code": "NO_ACCOUNTS",
+      "description": "The authenticated user has no accounts, so the Accounts Overview table contains no data rows and no Total row to extract."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_login_failed",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred and has been logged.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "LOGIN_FAILED",
+            "message": "ParaBank rejected the login credentials. Verify username and password and retry."
+          }
+        },
+        {
+          "id": "det_login_error_invalid",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "LOGIN_FAILED",
+            "message": "ParaBank could not verify the supplied username and password."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_app_unavailable",
+          "when": {
+            "kind": "text_visible",
+            "value": "503",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank returned HTTP 503 — the application is unavailable. Retry later or escalate."
+          }
+        },
+        {
+          "id": "det_connection_refused",
+          "when": {
+            "kind": "text_visible",
+            "value": "ERR_CONNECTION_REFUSED",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "Browser could not connect to ParaBank at the configured URL. Verify the application is running."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Accounts Overview link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/overview.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_accounts_overview_load_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error!",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank returned an error page when loading Accounts Overview. Check application logs."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Accounts Overview link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Accounts Overview",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"overview.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_extract",
+      "description": "Total row balance value in the Accounts Overview table",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Accounts Overview",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "NO_ACCOUNTS",
+        "message": "No Total row was found in the Accounts Overview table — the user likely has no accounts."
+      },
+      "action": "extract",
+      "target": {
+        "description": "Total row balance value in the Accounts Overview table",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Total||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      },
+      "output": "total_balance",
+      "parse": "currency"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Page state proving success: The \"Accounts Overview\" heading is rendered as the page title of that section on every successful load of the accounts table, regardless of the actual balance values shown — it is stable page state, not a data value.",
+    "match": {
+      "kind": "text_visible",
+      "value": "Accounts Overview",
+      "scope": null
+    }
+  }
+}

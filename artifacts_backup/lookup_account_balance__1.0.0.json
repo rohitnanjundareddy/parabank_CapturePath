@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "lookup_account_balance",
+  "version": "1.0.0",
+  "name": "lookup_account_balance",
+  "description": "Log in with the given username and password, open Accounts Overview, and read the balance of the given account into an output named balance",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-08-25T01:45:51.240149Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260825-014531-4d8e26",
+    "model": "claude-sonnet-4-6"
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "ParaBank username",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "Account number to look up in Accounts Overview",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "Secret. Injected at runtime, never stored.",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "balance",
+      "type": "number",
+      "description": "Current balance of the requested account in USD"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The account id does not appear in this user's Accounts Overview. A legitimate result the caller must handle, not a failure."
+    },
+    {
+      "code": "LOGIN_REJECTED",
+      "description": "ParaBank did not accept the supplied credentials."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "Open the ParaBank home page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Accounts Overview",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "bad_credentials",
+          "when": {
+            "kind": "text_visible",
+            "value": "could not be verified",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "LOGIN_REJECTED",
+            "message": "ParaBank rejected the supplied username and password"
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_extract",
+      "description": "Balance cell in the overview row for the requested account",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "ACCOUNT_NOT_FOUND",
+        "message": "No row for the requested account id in Accounts Overview"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Balance of account {{account_id}}",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "{{account_id}}||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          }
+        ]
+      },
+      "output": "balance",
+      "parse": "currency"
+    }
+  ],
+  "success": {
+    "id": "overview_reached",
+    "description": "Accounts Overview rendered; success is state, not a specific balance value",
+    "match": {
+      "kind": "text_visible",
+      "value": "Accounts Overview",
+      "scope": null
+    }
+  }
+}

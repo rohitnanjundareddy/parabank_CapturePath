@@ -1,0 +1,233 @@
+{
+  "schema_version": "1.0",
+  "kind": "fragment",
+  "id": "parabank_login",
+  "version": "1.0.0",
+  "name": "parabank_login",
+  "description": "Log in with the given username and password and reach the Accounts Overview page",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-11T00:20:28.855203Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260911-001934-9e1a26",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password and reach the Accounts Overview page",
+      "steps": [
+        {
+          "intent": "Enter the username into the username field",
+          "action": "Locate the username input field (e9) under the 'Customer Login' heading and type the supplied username value into it.",
+          "uses": []
+        },
+        {
+          "intent": "Enter the password into the password field",
+          "action": "Locate the password input field (e10) and type the supplied password value into it.",
+          "uses": []
+        },
+        {
+          "intent": "Submit the login form",
+          "action": "Click the 'Log In' button (e11) to submit the credentials.",
+          "uses": []
+        },
+        {
+          "intent": "Confirm the Accounts Overview page has loaded",
+          "action": "Verify that the page transitions to the Accounts Overview page, confirming successful login.",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to the ParaBank application.",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to the ParaBank application.",
+          "example": "demo",
+          "sensitive": true
+        }
+      ],
+      "outputs": [],
+      "success_signal": "The Accounts Overview page is displayed, showing a heading such as \"Accounts Overview\" and the authenticated user's account summary table, confirming a successful login.",
+      "reuse": []
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [],
+    "smoke_replay": "success (smoke-20260911-002036-03a025)",
+    "review_notes": [
+      "s02_type: only one locator candidate (css) — no fallback if it stops matching",
+      "s03_type: only one locator candidate (css) — no fallback if it stops matching",
+      "s04_click: only one locator candidate (role_name) — no fallback if it stops matching"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to the ParaBank application.",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to the ParaBank application.",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [],
+  "business_outcomes": [
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "The supplied username or password was not recognised by ParaBank; the user cannot be logged in."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "det_site_unavailable",
+          "when": {
+            "kind": "text_visible",
+            "value": "This site can't be reached",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank is not reachable at the configured URL. Verify the application is running and the URL is correct."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_type",
+      "description": "Username input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Username input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"username\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{username}}",
+      "sensitive": false
+    },
+    {
+      "id": "s03_type",
+      "description": "Password input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Password input field",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "input[name=\"password\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{password}}",
+      "sensitive": true
+    },
+    {
+      "id": "s04_click",
+      "description": "Log In button",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/overview.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "det_invalid_credentials",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INVALID_CREDENTIALS",
+            "message": "Login failed: the supplied username and/or password was not recognised by ParaBank."
+          }
+        },
+        {
+          "id": "det_session_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal error during login. This is a server-side problem; retry or escalate if it persists."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Log In button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Log In",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Accounts Overview",
+      "scope": null
+    }
+  }
+}
