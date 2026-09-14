@@ -249,7 +249,9 @@ TOOLS = [
     },
     {
         "name": "press",
-        "description": "Press a single keyboard key, e.g. 'Enter'.",
+        "description": "Press a single keyboard key, e.g. 'Enter'. Modifier "
+                       "combinations may use 'Control+X'; it is normalized so "
+                       "the recording replays on macOS too.",
         "input_schema": {
             "type": "object",
             "properties": {"key": {"type": "string"}, "why": {"type": "string"}},

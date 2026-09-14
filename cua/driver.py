@@ -24,6 +24,31 @@ from .schemas import (
 )
 
 
+_MODIFIER_ALIASES = {"control": "ControlOrMeta", "ctrl": "ControlOrMeta",
+                     "meta": "ControlOrMeta", "cmd": "ControlOrMeta",
+                     "command": "ControlOrMeta"}
+
+
+def normalize_key(key: str) -> str:
+    """Make a recorded keystroke mean the same thing on Windows and macOS.
+
+    An artifact records what the discovery model pressed, and "Control+A"
+    recorded on Windows is "Meta+A" on a mac -- the same intent, a different
+    key. Playwright resolves `ControlOrMeta` per platform at press time, so
+    rewriting the modifier here keeps one artifact correct on both, rather
+    than making the recording OS part of the contract.
+
+    Only the modifier is touched. The key itself ("Enter", "a", "ArrowDown")
+    is identical across platforms and passes through untouched.
+    """
+    parts = key.split("+")
+    if len(parts) == 1:
+        return key
+    *mods, final = parts
+    return "+".join([_MODIFIER_ALIASES.get(m.strip().lower(), m) for m in mods]
+                    + [final])
+
+
 class Controller(str, Enum):
     AUTOMATION = "automation"
     HUMAN = "human"
@@ -361,7 +386,7 @@ class PlaywrightDriver:
     def press(self, key: str) -> None:
         self._assert_automation()
         before = self.page_signature()
-        self._page.keyboard.press(key)
+        self._page.keyboard.press(normalize_key(key))
         self.after_action(before)
 
     # -- waiting and detection ----------------------------------------------

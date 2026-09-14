@@ -100,6 +100,26 @@ class TestLegacyFilesStillLoad:
         assert read_text(str(p)).startswith("allowed_domains")
 
 
+class TestKeystrokesMeanTheSameThing:
+    """A recorded keystroke is part of the artifact, so it must not encode the
+    OS that recorded it. Playwright resolves `ControlOrMeta` per platform."""
+
+    @pytest.mark.parametrize("recorded", [
+        "Control+A", "ctrl+c", "Meta+V", "Cmd+a", "Control+Shift+Tab"])
+    def test_modifiers_normalize(self, recorded):
+        from cua.driver import normalize_key
+        assert normalize_key(recorded).startswith("ControlOrMeta")
+
+    @pytest.mark.parametrize("recorded", ["Enter", "a", "ArrowDown", "Escape"])
+    def test_plain_keys_pass_through(self, recorded):
+        from cua.driver import normalize_key
+        assert normalize_key(recorded) == recorded
+
+    def test_non_modifier_prefixes_are_left_alone(self):
+        from cua.driver import normalize_key
+        assert normalize_key("Shift+Enter") == "Shift+Enter"
+
+
 def test_evidence_log_lines_are_utf8(tmp_path):
     from cua.evidence import EvidenceLog
     from cua.redaction import Redactor

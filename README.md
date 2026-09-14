@@ -138,6 +138,130 @@ Proceed? [y/N]:
 
 Unattended runs (`--non-interactive`) fail closed on these steps rather than proceeding. Capabilities containing one are never auto-approved, because proving them would mean performing them again. A form containing a password field is treated as authentication rather than a state change — otherwise every capability that logs in would demand a human.
 
+## Replaying every shipped artifact
+
+Eight artifacts ship in `artifacts/`. Every one is replayed with no model in the loop, so none of these need an API key — only ParaBank running locally.
+
+```
+docker run -d -p 8080:8080 parasoft/parabank      # or: --start-app on chat/ui
+python -m cua capabilities                        # signatures and approval status
+```
+
+Commands below are on one line each, so they paste unchanged into bash, zsh and PowerShell — the line-continuation character differs between them (`\` vs `` ` ``) and is the usual reason a copied command fails on the other OS.
+
+Every shipped artifact navigates to `http://localhost:8080/parabank/index.htm`, so the **local** instance is what these replay against; the public `parabank.parasoft.com` host is allowed by policy but is not where these recordings point. Register a throwaway user on the app first and use those credentials — `john` / `demo` below is a placeholder, not an account that exists on your instance.
+
+`password` is sensitive on every artifact, so it is omitted here: the CLI prompts for it without echo and registers it with the redactor before anything is written. Pass `--secret password=...` only for unattended runs, and accept that it lands in shell history.
+
+Add `--headless` to any of these to run without a visible browser.
+
+### Read-only — safe to run repeatedly
+
+**`parabank_login@1.0.0`** — the fragment the others compose. Replayable on its own, which is the quickest check that the app is up and your credentials work.
+
+```
+python -m cua replay parabank_login@1.0.0 --input username=john
+```
+
+**`account_detail@1.0.0`** — account type and balance for one account.
+
+```
+python -m cua replay account_detail@1.0.0 --input username=john --input account_id=13344
+```
+
+**`account_activity@1.0.0`** — the full transaction table for one account, as text.
+
+```
+python -m cua replay account_activity@1.0.0 --input username=john --input account_id=13344
+```
+
+**`get_recent_transactions@1.0.0`** — the first five transactions listed.
+
+```
+python -m cua replay get_recent_transactions@1.0.0 --input username=john --input account_id=13344
+```
+
+**`demo_find_tx@1.0.0`** — Find Transactions by amount; returns `match_count`.
+
+```
+python -m cua replay demo_find_tx@1.0.0 --input username=john --input account_id=13344 --input amount=100
+```
+
+**`demo_tx_range@1.0.0`** — Find Transactions by date range; returns `match_count`. Dates are **MM-DD-YYYY**.
+
+```
+python -m cua replay demo_tx_range@1.0.0 --input username=john --input account_id=13344 --input start_date=01-01-2026 --input end_date=12-31-2026
+```
+
+Year-to-date, without hand-editing the range each run:
+
+```
+# bash / zsh
+python -m cua replay demo_tx_range@1.0.0 --input username=john --input account_id=13344 --input start_date=01-01-$(date +%Y) --input end_date=$(date +%m-%d-%Y)
+```
+
+```
+# PowerShell
+$s = "01-01-$(Get-Date -f yyyy)"; $e = Get-Date -f MM-dd-yyyy
+python -m cua replay demo_tx_range@1.0.0 --input username=john --input account_id=13344 --input start_date=$s --input end_date=$e
+```
+
+### Business outcomes — the declared "not there" answers
+
+A nonexistent account is an answer, not a crash. These exit 0 with an outcome code, not 2:
+
+```
+python -m cua replay account_detail@1.0.0 --input username=john --input account_id=99999
+#   -> ACCOUNT_NOT_FOUND
+
+python -m cua replay parabank_login@1.0.0 --input username=nosuchuser
+#   -> INVALID_CREDENTIALS
+
+python -m cua replay demo_tx_range@1.0.0 --input username=john --input account_id=13344 --input start_date=01-01-1990 --input end_date=12-31-1990
+#   -> NO_TRANSACTIONS_FOUND
+```
+
+### State-changing — these do something to the account
+
+**`open_savings_account@1.0.0`** — opens a real savings account funded from `account_id`. Step `s05_click` is recorded `risky`, so replay shows what is about to be submitted and asks first. Every successful run leaves a new account behind on your instance.
+
+```
+python -m cua replay open_savings_account@1.0.0 --input username=john --input account_id=13344
+```
+
+The same run unattended, to watch it fail closed rather than submit without a human:
+
+```
+python -m cua replay open_savings_account@1.0.0 --input username=john --input account_id=13344 --secret password=demo --non-interactive
+```
+
+**`transfer_demo@1.0.0`** — the one that is *meant* to be refused. It is still a `draft`, and `/transfer.htm` is in `blocked_url_patterns`, so it is stopped twice over: `--allow-draft` gets past the approval gate and the policy gate blocks the run anyway.
+
+```
+python -m cua replay transfer_demo@1.0.0 --allow-draft --input username=john --input account_id=13344 --input from_account_id=13344 --input to_account_id=13566 --input transfer_amount=100
+```
+
+### Composition and evidence
+
+```
+python -m cua graph account_detail@1.0.0     # capability -> pinned fragment versions
+python -m cua graph demo_tx_range@1.0.0
+```
+
+Each run writes a redacted JSONL trace to `evidence/replay-<timestamp>/events.jsonl`, with a screenshot on failure. Exit code is 0 for a success or a declared business outcome, 2 for a hard failure.
+
+### Disclaimer
+
+These commands were exercised on **macOS**. They are written to be platform-neutral and the test suite passes on both, but a full end-to-end replay depends on things outside this repo, and another machine can still diverge:
+
+- **Account state — the most common cause of a confusing result.** ParaBank accounts are per-user and mutable. `13344` and `13566` are the account numbers from the machine these were recorded on; yours will differ, and `open_savings_account` changes them on every successful run. `ACCOUNT_NOT_FOUND` or `NO_TRANSACTIONS_FOUND` on a fresh instance usually means the data is not there, not that replay is broken — run `account_detail` against an account you can actually see in Accounts Overview first.
+- **Chromium build.** Playwright ships its own browser, so run `playwright install chromium` on each machine rather than assuming the one already there. A different Chromium version can change rendering enough to move a text extraction.
+- **Timing.** The recovery ladder absorbs ordinary slowness, but a cold `docker run` or a loaded machine can outlast a wait and surface as a locator failure rather than a timeout.
+- **Docker networking.** `localhost:8080` assumes the container publishes straight to the host. Under a VM-backed Docker Desktop, a remote daemon, or WSL2 with its own network namespace, the app may be reachable somewhere else.
+- **The public instance is shared.** If you point anything at `parabank.parasoft.com`, other people are using it and its data resets on its own schedule.
+
+Encoding differences are the one class of breakage covered by tests: `tests/test_portability.py` reads every committed artifact with the local decoder. Run it first on a new machine — it fails fast, and needs no browser.
+
 ## Tests
 
 ```
