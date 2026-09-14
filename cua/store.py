@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from .schemas import Artifact, ApprovalStatus, RunSubflowStep
+from .textio import read_text, write_text
 
 
 class ArtifactStore:
@@ -23,23 +24,24 @@ class ArtifactStore:
 
     def save(self, artifact: Artifact) -> str:
         path = self._path(artifact.ref)
-        with open(path, "w") as f:
-            f.write(artifact.model_dump_json(indent=2))
+        # Through textio, never bare open(): an artifact is a committed file
+        # that another machine has to replay, so it is written UTF-8 + LF on
+        # every platform rather than in whatever the local locale prefers.
+        write_text(path, artifact.model_dump_json(indent=2))
         return path
 
     def load(self, ref: str) -> Artifact:
         path = self._path(ref)
         if not os.path.exists(path):
             raise FileNotFoundError(f"no artifact '{ref}' in {self.base_dir}")
-        with open(path) as f:
-            return Artifact.model_validate_json(f.read())
+        return Artifact.model_validate_json(read_text(path))
 
     def list(self) -> list[Artifact]:
         out = []
         for fn in sorted(os.listdir(self.base_dir)):
             if fn.endswith(".json"):
-                with open(os.path.join(self.base_dir, fn)) as f:
-                    out.append(Artifact.model_validate_json(f.read()))
+                out.append(Artifact.model_validate_json(
+                    read_text(os.path.join(self.base_dir, fn))))
         return out
 
     def approve(self, ref: str, force: bool = False) -> Artifact:

@@ -83,9 +83,20 @@ def _infer_output(sample: str) -> tuple[ParamType, str]:
     typing it as a number would hand back 13344.0, drop any leading zero,
     and invite arithmetic on something that is not a quantity. Anything
     that is not unambiguously money stays a string.
+
+    A COLLECTION is never a scalar, however much money it contains. Reading
+    a whole transaction table yields text full of currency symbols, and
+    typing that as one number makes replay try to parse the entire table as
+    a single amount — which fails, and the failure then gets mapped to
+    "this account has no transactions" while the page plainly shows twelve.
+    Rows and cells are the tell: a value carrying newlines or tabs, or more
+    than one amount, is a table and stays text.
     """
     s = (sample or "").strip()
-    if re.search(r"[$€£]", s) and re.search(r"\d", s):
+    looks_like_a_collection = ("\n" in s or "\t" in s
+                               or len(re.findall(r"[$€£]\s?[\d,]", s)) > 1)
+    if (not looks_like_a_collection
+            and re.search(r"[$€£]", s) and re.search(r"\d", s)):
         return ParamType.NUMBER, "currency"
     return ParamType.STRING, "text"
 

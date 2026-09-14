@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import yaml
 
 from .schemas import RiskLevel
+from .textio import read_text
 
 
 class Verdict(str, Enum):
@@ -58,8 +59,7 @@ class PolicyEngine:
 
     @classmethod
     def from_yaml(cls, path: str) -> "PolicyEngine":
-        with open(path) as f:
-            return cls(yaml.safe_load(f))
+        return cls(yaml.safe_load(read_text(path)))
 
     # -- classification -----------------------------------------------------
 

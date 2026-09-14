@@ -181,7 +181,33 @@ cua/ui.py          browser chat window over discover / approve / replay
 cua/evidence.py    redacted JSONL evidence logging
 cua/redaction.py   secret masking, applied at write time
 cua/store.py       versioned artifact store and dependency graph
+cua/textio.py      the only file reader/writer: UTF-8 + LF on every OS
 cua/cli.py         command entry points
 ```
+
+## Artifacts across Windows and macOS
+
+Artifacts are committed files replayed on machines other than the one that
+recorded them, so their encoding is part of the contract. Everything that
+touches a file goes through `cua/textio.py`, which **writes UTF-8 with LF
+endings on every platform** and reads permissively (UTF-8, then cp1252, BOM
+stripped).
+
+This is not cosmetic. `recorder.py` writes review notes containing an em dash;
+Python's `open()` defaults to the *locale* encoding, so on Windows that became
+the single byte `0x97`, which is not valid UTF-8 — and every macOS replay of
+that artifact died in the decoder before the engine ran. `.gitattributes` pins
+the same files to LF in the repository so a re-save on the other OS diffs only
+where the flow changed.
+
+Artifacts written before this are still loadable; re-saving one normalizes it.
+To repair a directory in place:
+
+```bash
+python -c "from cua.textio import normalize_dir; print(normalize_dir('artifacts'))"
+```
+
+`tests/test_portability.py` asserts every committed artifact is UTF-8 + LF, so
+a regression fails in CI rather than on a reviewer's laptop.
 
 See REPORT.md for design reasoning, trade-offs, and cut lines.

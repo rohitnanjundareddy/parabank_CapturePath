@@ -85,10 +85,10 @@
     ],
     "smoke_replay": "skipped: state-changing steps",
     "review_notes": [
-      "s03_select: only one locator candidate (css) — no fallback if it stops matching",
-      "s04_type: only one locator candidate (css) — no fallback if it stops matching",
-      "s05_type: only one locator candidate (css) — no fallback if it stops matching",
-      "s07_extract: only one locator candidate (css) — no fallback if it stops matching"
+      "s03_select: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s04_type: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s05_type: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s07_extract: only one locator candidate (css) â€” no fallback if it stops matching"
     ]
   },
   "inputs": [
@@ -205,7 +205,7 @@
           },
           "then": {
             "type": "hard_failure",
-            "message": "ParaBank returned HTTP 503 — the application is unavailable. Check server health before retrying."
+            "message": "ParaBank returned HTTP 503 â€” the application is unavailable. Check server health before retrying."
           }
         }
       ],

@@ -307,7 +307,7 @@
       "on_exhausted": {
         "type": "business_outcome",
         "code": "ACCOUNT_NOT_FOUND",
-        "message": "The balance value could not be extracted from the account detail page — the account row was not rendered."
+        "message": "The balance value could not be extracted from the account detail page â€” the account row was not rendered."
       },
       "action": "extract",
       "target": {

@@ -1,0 +1,275 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "account_activity",
+  "version": "1.0.0",
+  "name": "account_activity",
+  "description": "Log in, open the account activity page for account {{account_id}}, and read the transaction table into an output named transactions",
+  "app": "parabank",
+  "status": "approved",
+  "provenance": {
+    "recorded_at": "2026-09-14T21:45:20.500235Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260914-214430-27a710",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in, open the account activity page for account {{account_id}}, and read the transaction table into an output named transactions",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay fragment parabank_login@1.0.0 using username and password parameters",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the account activity page for the specified account",
+          "action": "Click on or navigate to the account link matching account_id (13344) to open its activity/transaction page",
+          "uses": []
+        },
+        {
+          "intent": "Read the transaction table from the account activity page into the transactions output",
+          "action": "Extract all rows and columns from the transaction table displayed on the account activity page and capture them as the transactions output",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account ID whose activity/transaction page should be opened",
+          "example": "13344",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "transactions"
+      ],
+      "success_signal": "The Account Activity page is displayed, showing a transaction table with column headers (e.g. Date, Description, Debit, Credit) for the specified account",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [],
+    "smoke_replay": "success (smoke-20260914-214533-aca3ba)",
+    "review_notes": [
+      "s03_extract: only one locator candidate (css) — no fallback if it stops matching"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account ID whose activity/transaction page should be opened",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "transactions",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The requested account_id does not exist or is not accessible to the authenticated user; the application returns an error rather than an activity page."
+    },
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "The username/password combination was rejected during login; the user cannot proceed to any account page."
+    },
+    {
+      "code": "NO_TRANSACTIONS",
+      "description": "The account exists and the activity page loaded successfully, but the transaction table is empty — there are no transactions to return."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "login_credentials_rejected",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "Login failed: the supplied username or password was not accepted by ParaBank."
+          }
+        },
+        {
+          "id": "login_error_banner",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error!",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "An unexpected error banner appeared during the login subflow. Inspect the page for details."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_navigate",
+      "description": "Navigate directly to the account activity page for account {{account_id}}",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/activity.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "account_not_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "Could not find account with id:",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_NOT_FOUND",
+            "message": "The account_id '{{account_id}}' was not found in ParaBank. Verify the account exists and belongs to the authenticated user."
+          }
+        },
+        {
+          "id": "activity_page_load_failure",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank returned an internal error when loading the account activity page. The application may be unavailable or misconfigured."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/activity.htm?id={{account_id}}"
+    },
+    {
+      "id": "s03_extract",
+      "description": "Transaction table from the account activity page",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Account Activity",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "no_transactions",
+          "when": {
+            "kind": "text_visible",
+            "value": "No transactions found.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "NO_TRANSACTIONS",
+            "message": "The account activity page loaded but contains no transactions. An empty result has been returned."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "NO_TRANSACTIONS",
+        "message": "The transaction table was not present on the account activity page, indicating the account has no recorded transactions."
+      },
+      "action": "extract",
+      "target": {
+        "description": "Transaction table from the account activity page",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#transactionTable",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "output": "transactions",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Account Activity",
+      "scope": null
+    }
+  }
+}

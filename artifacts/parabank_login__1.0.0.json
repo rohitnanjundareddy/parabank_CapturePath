@@ -59,9 +59,9 @@
     "hardening_rejected": [],
     "smoke_replay": "success (smoke-20260911-002036-03a025)",
     "review_notes": [
-      "s02_type: only one locator candidate (css) — no fallback if it stops matching",
-      "s03_type: only one locator candidate (css) — no fallback if it stops matching",
-      "s04_click: only one locator candidate (role_name) — no fallback if it stops matching"
+      "s02_type: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s03_type: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s04_click: only one locator candidate (role_name) â€” no fallback if it stops matching"
     ]
   },
   "inputs": [

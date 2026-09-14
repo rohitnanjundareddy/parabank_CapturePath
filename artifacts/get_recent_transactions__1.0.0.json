@@ -66,7 +66,7 @@
     "hardening_rejected": [],
     "smoke_replay": "success (smoke-20260912-020539-1d59cc)",
     "review_notes": [
-      "s04_extract: only one locator candidate (text) — no fallback if it stops matching"
+      "s04_extract: only one locator candidate (text) â€” no fallback if it stops matching"
     ]
   },
   "inputs": [
@@ -105,7 +105,7 @@
   "business_outcomes": [
     {
       "code": "ACCOUNT_NOT_FOUND",
-      "description": "The requested account_id does not appear in the Accounts Overview table — the account does not exist or does not belong to the authenticated user."
+      "description": "The requested account_id does not appear in the Accounts Overview table â€” the account does not exist or does not belong to the authenticated user."
     },
     {
       "code": "CREDENTIALS_REJECTED",
@@ -113,7 +113,7 @@
     },
     {
       "code": "NO_TRANSACTIONS",
-      "description": "The Account Activity page loaded successfully but the transaction table contains no rows — the account has no transaction history to return."
+      "description": "The Account Activity page loaded successfully but the transaction table contains no rows â€” the account has no transaction history to return."
     }
   ],
   "steps": [

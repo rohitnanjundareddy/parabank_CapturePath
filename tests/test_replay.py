@@ -222,6 +222,40 @@ class TestExtractionHonesty:
         assert r.output_evidence["balance"].source_text == "$1,234.56"
 
 
+class TestUnreadableIsNotAbsent:
+    """`on_exhausted` declares what ABSENCE means. Content that was found but
+    could not be parsed is not absence, and must not be reported as one."""
+
+    def _artifact_reading(self, parse_mode):
+        art = balance_artifact().model_dump()
+        art["steps"][1]["parse"] = parse_mode
+        return Artifact.model_validate(art)
+
+    def test_unparseable_content_is_a_failure_not_a_business_outcome(self, tmp_path):
+        d = FakeDriver()
+        d.texts_visible.add("Account Overview")
+        # a whole table, typed as currency by a recorder that saw a "$"
+        d.element_text["13344||td:nth-child(2)"] = (
+            "Date\tAmount\n12-10-2025\t$300.00\n12-11-2025\t$100.00")
+        engine, store = make_engine(tmp_path, d)
+        store.save(self._artifact_reading("currency"))
+
+        r = engine.run("lookup@1.0.0", {"account_id": "13344"})
+        assert r.status == ReplayStatus.HARD_FAILURE
+        assert r.outcome_code != "ACCOUNT_NOT_FOUND"   # never "it is not there"
+        assert "could not be parsed" in (r.observed or "")
+
+    def test_genuine_absence_still_reports_the_business_outcome(self, tmp_path):
+        d = FakeDriver()
+        d.texts_visible.add("Account Overview")       # row simply not present
+        engine, store = make_engine(tmp_path, d)
+        store.save(self._artifact_reading("currency"))
+
+        r = engine.run("lookup@1.0.0", {"account_id": "99999"})
+        assert r.status == ReplayStatus.BUSINESS_OUTCOME
+        assert r.outcome_code == "ACCOUNT_NOT_FOUND"
+
+
 class TestLadderIdentity:
     """Every rung must point at the SAME element. A fallback that drops the
     caller's parameter answers a different question — and returns another

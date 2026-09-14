@@ -152,7 +152,7 @@
           },
           "then": {
             "type": "hard_failure",
-            "message": "ParaBank returned HTTP 503 — the application is unavailable. Retry later or escalate."
+            "message": "ParaBank returned HTTP 503 â€” the application is unavailable. Retry later or escalate."
           }
         },
         {
@@ -236,7 +236,7 @@
       "on_exhausted": {
         "type": "business_outcome",
         "code": "NO_ACCOUNTS",
-        "message": "No Total row was found in the Accounts Overview table — the user likely has no accounts."
+        "message": "No Total row was found in the Accounts Overview table â€” the user likely has no accounts."
       },
       "action": "extract",
       "target": {
@@ -256,7 +256,7 @@
   ],
   "success": {
     "id": "goal_proof",
-    "description": "Page state proving success: The \"Accounts Overview\" heading is rendered as the page title of that section on every successful load of the accounts table, regardless of the actual balance values shown — it is stable page state, not a data value.",
+    "description": "Page state proving success: The \"Accounts Overview\" heading is rendered as the page title of that section on every successful load of the accounts table, regardless of the actual balance values shown â€” it is stable page state, not a data value.",
     "match": {
       "kind": "text_visible",
       "value": "Accounts Overview",

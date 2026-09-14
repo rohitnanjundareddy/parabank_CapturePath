@@ -45,6 +45,18 @@ from .store import ArtifactStore
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
 
 
+class _Unreadable(Exception):
+    """The element WAS found; its content could not be interpreted.
+
+    Distinct from absence on purpose. A step's `on_exhausted` business
+    outcome means "the thing the caller asked for is not there" — so it must
+    not swallow a value that was sitting right there and merely failed to
+    parse. Reading a whole transaction table and typing it as one currency
+    amount produced exactly that: a parse error reported as "this account
+    has no transactions", with twelve of them on screen.
+    """
+
+
 class _Terminal(Exception):
     """Internal control flow carrying the final result."""
     def __init__(self, result: ReplayResult):
@@ -273,6 +285,12 @@ class ReplayEngine:
                 action = self._check_detectors(step, params, result,
                                                recover_budget) \
                     or step.on_exhausted
+                # on_exhausted declares what ABSENCE means. If the element was
+                # found and only its content defeated us, reporting "not
+                # found" would hand the caller a confident wrong answer — a
+                # table of twelve transactions reported as "no transactions".
+                if isinstance(e, _Unreadable) and isinstance(action, OutcomeAction):
+                    action = FailAction(message=str(e))
                 if isinstance(action, RecoverAction):
                     budget_key = f"{step.id}:{action.remedy}"
                     used = recover_budget.get(budget_key, 0)
@@ -377,7 +395,12 @@ class ReplayEngine:
                 # usually a business outcome ("no such row") rather than data.
                 raise ValueError(
                     f"'{step.output}' resolved an element but it contained no text")
-            result.outputs[step.output] = _parse(text, step.parse)
+            try:
+                result.outputs[step.output] = _parse(text, step.parse)
+            except ValueError as exc:
+                raise _Unreadable(
+                    f"'{step.output}' read {text[:60]!r} but could not be "
+                    f"parsed as {step.parse}: {exc}") from exc
             result.output_evidence[step.output] = OutputEvidence(
                 source_text=text, locator_used=strat,
                 captured_at=datetime.now(timezone.utc))

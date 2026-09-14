@@ -80,9 +80,9 @@
     },
     "plan_approved_by": "operator",
     "verification_problems": [
-      "parameter 'from_account_id' was planned as an input but no recorded step references it — it is frozen as a constant",
-      "parameter 'to_account_id' was planned as an input but no recorded step references it — it is frozen as a constant",
-      "parameter 'transfer_amount' was planned as an input but no recorded step references it — it is frozen as a constant",
+      "parameter 'from_account_id' was planned as an input but no recorded step references it â€” it is frozen as a constant",
+      "parameter 'to_account_id' was planned as an input but no recorded step references it â€” it is frozen as a constant",
+      "parameter 'transfer_amount' was planned as an input but no recorded step references it â€” it is frozen as a constant",
       "planned output 'transfer_confirmation_message' is not produced by the recording"
     ],
     "hardening_rejected": [],
@@ -210,7 +210,7 @@
           },
           "then": {
             "type": "hard_failure",
-            "message": "ParaBank application returned HTTP 503 – the server is unavailable. Check deployment health before retrying."
+            "message": "ParaBank application returned HTTP 503 â€“ the server is unavailable. Check deployment health before retrying."
           }
         },
         {
@@ -222,7 +222,7 @@
           },
           "then": {
             "type": "hard_failure",
-            "message": "Browser could not reach http://localhost:8080/parabank – the server may be down or the URL is wrong."
+            "message": "Browser could not reach http://localhost:8080/parabank â€“ the server may be down or the URL is wrong."
           }
         },
         {

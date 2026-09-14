@@ -1,0 +1,11 @@
+# Artifacts are replayed on whichever machine checks them out, so their bytes
+# are part of the contract. Normalize to LF in the repository and on checkout
+# for every text file, so a Windows recording and a mac recording of the same
+# flow differ only where the flow differs -- not on every line.
+*.py    text eol=lf
+*.json  text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.jsonl text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf

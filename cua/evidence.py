@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 
 from .redaction import Redactor
+from .textio import append_line
 
 
 class EvidenceLog:
@@ -28,8 +29,7 @@ class EvidenceLog:
             **fields,
         }
         line = self._redactor.scrub(json.dumps(record, default=str))
-        with open(self._path, "a") as f:
-            f.write(line + "\n")
+        append_line(self._path, line)
 
     def screenshot_path(self, label: str) -> str:
         safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)

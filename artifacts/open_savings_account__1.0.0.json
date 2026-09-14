@@ -81,10 +81,10 @@
     "hardening_rejected": [],
     "smoke_replay": "skipped: state-changing steps",
     "review_notes": [
-      "s03_select: only one locator candidate (css) — no fallback if it stops matching",
-      "s04_select: only one locator candidate (css) — no fallback if it stops matching",
-      "s05_click: only one locator candidate (role_name) — no fallback if it stops matching",
-      "s06_extract: only one locator candidate (css) — no fallback if it stops matching"
+      "s03_select: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s04_select: only one locator candidate (css) â€” no fallback if it stops matching",
+      "s05_click: only one locator candidate (role_name) â€” no fallback if it stops matching",
+      "s06_extract: only one locator candidate (css) â€” no fallback if it stops matching"
     ]
   },
   "inputs": [

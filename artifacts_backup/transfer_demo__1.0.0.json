@@ -75,9 +75,9 @@
     },
     "plan_approved_by": "operator",
     "verification_problems": [
-      "parameter 'from_account_id' was planned as an input but no recorded step references it — it is frozen as a constant",
-      "parameter 'to_account_id' was planned as an input but no recorded step references it — it is frozen as a constant",
-      "parameter 'transfer_amount' was planned as an input but no recorded step references it — it is frozen as a constant",
+      "parameter 'from_account_id' was planned as an input but no recorded step references it â€” it is frozen as a constant",
+      "parameter 'to_account_id' was planned as an input but no recorded step references it â€” it is frozen as a constant",
+      "parameter 'transfer_amount' was planned as an input but no recorded step references it â€” it is frozen as a constant",
       "planned output 'transfer_confirmation_message' is not produced by the recording"
     ],
     "hardening_rejected": [],
