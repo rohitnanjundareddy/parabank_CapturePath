@@ -22,17 +22,42 @@ docker run -d -p 8080:8080 parasoft/parabank
 
 The app is then at http://localhost:8080/parabank/index.htm. To run without local services, substitute the public instance URL https://parabank.parasoft.com/parabank/index.htm (already in `config/policy.yaml`). Register a throwaway user on the site first; never use real credentials.
 
-4. Provide a model API key. Any of these work:
+4. Provide a model API key. The variable is named **`ANTHROPIC_API_KEY`** — that exact spelling is what the Anthropic SDK reads, and nothing else is checked.
+
+**`discover`, `chat` and `ui` must be run from a terminal where it is set.** Set it in the same shell you are about to run them in:
+
+```powershell
+# PowerShell — this session only
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+python -m cua discover ...
+```
+```bash
+# bash / zsh — this session only
+export ANTHROPIC_API_KEY=sk-ant-...
+python -m cua discover ...
+```
+
+It is scoped to that shell. A new terminal tab, a new VS Code window, or a shell opened by another tool does **not** inherit it, and this project deliberately does not read a `.env` file or save the key anywhere. Check before a demo rather than halfway through one:
+
+```powershell
+if ($env:ANTHROPIC_API_KEY) { "key is set" } else { "NOT SET" }   # PowerShell
+```
+```bash
+[ -n "$ANTHROPIC_API_KEY" ] && echo "key is set" || echo "NOT SET"   # bash
+```
+
+To persist it across new terminals on Windows, `setx ANTHROPIC_API_KEY "sk-ant-..."` — note that `setx` affects only terminals opened *afterwards*, not the one you typed it in.
+
+If it is missing the command says so and prompts, without echo and without saving:
 
 ```
-python -m cua discover ... --api-key sk-ant-...     # explicit
-$env:ANTHROPIC_API_KEY = "sk-ant-..."               # PowerShell
-export ANTHROPIC_API_KEY=sk-ant-...                 # bash
+No ANTHROPIC_API_KEY in the environment.
+Anthropic API key (not echoed, not saved):
 ```
 
-If none is set you are prompted without echo. A key passed as a flag lands in shell history, so the prompt is the better path for a demo.
+Answering the prompt is the better path for a demo: `--api-key sk-ant-...` also works but lands the key in shell history.
 
-**Only `discover`, `chat` and `ui` need a key.** `replay`, `capabilities`, `graph`, `approve` and the test suite all run without one — replay has no model in it at all.
+**Only `discover`, `chat` and `ui` need a key.** `replay`, `capabilities`, `graph`, `approve` and the test suite all run without one — replay has no model in it at all, which is the point of the artifact.
 
 ## Demo path
 
@@ -84,6 +109,8 @@ python -m cua approve <ref>                   # deliberate human approval
 
 Saved artifacts are exposed as a catalog of callable tools — the typed contract in the artifact *is* the function signature. The model picks a capability and fills in its arguments, then stops: it never drives the browser, never chooses a locator, and never decides what a page means. Execution is the same deterministic replay engine used everywhere else.
 
+Both drive a model, so run them from a shell with `ANTHROPIC_API_KEY` set (see Setup step 4); without it they stop and prompt for the key.
+
 ```
 python -m cua chat --start-app        # terminal
 python -m cua ui   --start-app        # browser chat window
@@ -111,15 +138,34 @@ The browser UI adds a **Discover** toggle. With it off, only existing capabiliti
 
 During discovery the model may declare itself stuck; during replay a step may declare escalate. In both cases the run pauses, an intervention request with context and a screenshot is printed, and the already-open browser window is handed to you. Perform the manual steps, describe what you did, press Enter, and the run resumes on the same session. Everything you clicked is recorded into the run's evidence. Automation is physically prevented from acting while you hold the session.
 
-To trigger it, ask for something policy blocks:
+### When a human is worth interrupting
+
+The gate stops **automation**. An attended operator may still act on their own authority, so a policy block does hand the browser over — that is what the escalation surface is for. What it must not do is ask forever:
+
+- **Every handover is bounded.** `--max-escalations` (default 2) caps how many times one run may ask, and a blocker reported again after an intervention stops it immediately — the same problem coming back means the handover did not change what the agent can do. Without that cap a stuck agent asked the operator to describe what they did, over and over, while nothing moved.
+- **`--no-escalate-policy-blocks`** turns the handover off for policy refusals specifically, for unattended runs or when you would rather the run fail loudly than have someone finish it by hand.
+- **The run says why it stopped.** A failed discovery prints the agent's own reason and, where one applies, the rule that refused it.
+
+To see it, ask for something policy blocks. Bill pay is the remaining blocked route:
 
 ```
-python -m cua discover "Open the Transfer Funds page and transfer 100 dollars from account 13344 to account 13566" \
-  --url http://localhost:8080/parabank/index.htm --id transfer_demo \
-  --input username=john --input account_id=13344 --secret password=demo
+python -m cua discover "Open the Bill Pay page and pay 50 dollars to the payee named Acme from account 13344" --url http://localhost:8080/parabank/index.htm --id billpay_demo --input username=john --input account_id=13344 --secret password=demo
 ```
 
 Note what happens afterwards: the actions you performed by hand are captured as evidence but do not become replayable steps, so verification reports the planned parameters as unused and **refuses to approve the recording**. That is intentional — see REPORT.md §7.
+
+This is the property to understand before designing a policy, because it decides what the system can ever learn: **only the agent's own actions become replayable steps.** A handover lets a human finish the *task*; it cannot produce a *recording*. So a flow the agent is forbidden to perform is a flow that can never be recorded, no matter how many times an operator completes it by hand — the draft comes back with its parameters frozen and its outputs missing, every time. Blocking a route is therefore a decision about what the catalog may ever contain, not just about what happens today.
+
+Be clear about what the approval refusal does and does not protect, too: the artifact cannot be approved, but anything the operator did in the live app really happened. The approval gate protects the catalog, not the world.
+
+### What the gate judges
+
+Two rules decide every action, and they are not interchangeable:
+
+- **Where it is going.** For a navigation that is the DESTINATION, never the page the agent happens to be standing on. `blocked_url_patterns` and the domain allowlist are the right way to put a route out of bounds, and they are what refuses a forbidden address.
+- **What it does there.** Commits are detected structurally — a real submit, or a button inside a non-authentication form — not from a control's label, because a label is the one thing a vendor renames per tenant. The description patterns in `config/policy.yaml` only refine an action already known to commit, or one whose commit-ness was never determined; they are never allowed to turn a link into a state change.
+
+A blocked route therefore refuses the navigation itself. It does not leave the agent stranded on a forbidden page discovering the rule one action at a time.
 
 ## Confirmation on state-changing actions
 
@@ -235,7 +281,7 @@ The same run unattended, to watch it fail closed rather than submit without a hu
 python -m cua replay open_savings_account@1.0.0 --input username=john --input account_id=13344 --secret password=demo --non-interactive
 ```
 
-**`transfer_demo@1.0.0`** — the one that is *meant* to be refused. It is still a `draft`, and `/transfer.htm` is in `blocked_url_patterns`, so it is stopped twice over: `--allow-draft` gets past the approval gate and the policy gate blocks the run anyway.
+**`transfer_demo@1.0.0`** — still a `draft`, so the approval gate refuses it and `--allow-draft` is required to run it at all. It moves real money between two of your accounts, and its submit step asks you to confirm first.
 
 ```
 python -m cua replay transfer_demo@1.0.0 --allow-draft --input username=john --input account_id=13344 --input from_account_id=13344 --input to_account_id=13566 --input transfer_amount=100
@@ -249,6 +295,81 @@ python -m cua graph demo_tx_range@1.0.0
 ```
 
 Each run writes a redacted JSONL trace to `evidence/replay-<timestamp>/events.jsonl`, with a screenshot on failure. Exit code is 0 for a success or a declared business outcome, 2 for a hard failure.
+
+### Observed results, and what to read them as
+
+Run against a local ParaBank on 2026-09-15. Every command below returned `"status": "success"` and exit 0 — which is exactly why the `output_evidence` block matters more than the status line. Each output carries the `source_text` it was read from, and that is what tells you whether the capability answered the question you asked.
+
+| capability | output | source_text actually read | verdict |
+|---|---|---|---|
+| `parabank_login` | — | — | ✅ reaches Accounts Overview |
+| `account_detail` | `account_type`, `balance` | the account's own cells | ✅ real values |
+| `account_activity` | `transactions` | the full `#transactionTable` | ✅ real table, 25 rows |
+| `get_recent_transactions` | `recent_transactions` | `"Account Activity"` | ❌ the page heading |
+| `demo_find_tx` | `match_count` | `"Find Transactions"` | ❌ the page heading |
+| `demo_tx_range` | `match_count` | `"12456\n\t12567\n\t..."` | ❌ the account dropdown |
+| `open_savings_account` | `new_account_id` | `"CHECKING\n  SAVINGS"` | ❌ the account-type dropdown |
+| `demo_transfer` | `transfer_confirmation_message` | `"Transfer Funds"` | ❌ the page heading |
+
+**Five of the seven extracting capabilities read the wrong element and reported success.** This is not a replay bug — the ladders resolve, the steps run, the success checkpoint is satisfied. It is a *recording* defect: the discovery model pointed the extract step at a heading or a dropdown rather than at the result, and nothing downstream re-checks what an extract is pointing at. `python -m cua capabilities` shows their declared signatures; only the target tells you what they really read:
+
+```
+demo_tx_range      -> css  #accountId          (the dropdown, not a count)
+demo_find_tx       -> text "Find Transactions" (the heading, not a count)
+open_savings_account -> css #type              (the dropdown, not the new id)
+```
+
+Two things follow, and both are in REPORT.md's known-weaknesses list. `review_notes` flags every single-rung extract (`only one locator candidate — no fallback`), which each of these carries; and a success checkpoint proves *the page arrived*, not *the output is the answer*. Reading `output_evidence.source_text` on a new recording is currently the only check that catches this, which is why it is printed on every run.
+
+These five are left in the repo as recorded rather than hand-edited: an artifact is a record of what discovery actually produced, and a corrected one would misrepresent how often the model gets extraction right on the first pass.
+
+### Human intervention, end to end
+
+The transfer capability is the worked example, because it exercises the handoff for a reason nothing in the system can fix: the destination account does not exist on this instance.
+
+`discover` drives a model, so run it from a shell with `ANTHROPIC_API_KEY` set (Setup step 4). It is the one command here that will stop and ask for a key if the variable is missing — and it asks *after* the browser is already open, which is an awkward moment to discover it.
+
+```
+python -m cua discover "Log in with the given username and password, open the Transfer Funds page, transfer the given amount from the given source account to the given destination account, and confirm the transfer completed" --url http://localhost:8080/parabank/index.htm --id demo_transfer --input username=john --input source_account=13344 --input destination_account=13455 --input amount=1 --secret password=demo --max-steps 12
+```
+
+**What to expect, in order:**
+
+1. **A plan to approve.** Five steps, with `parabank_login@1.0.0` listed under `REUSES` — the login is replayed deterministically, not rediscovered. Answer `a`.
+2. **An intervention request**, because `13455` is not in the To Account dropdown. The agent lists the accounts it can actually see and hands you the live browser. This is the honest case for a handoff: the agent is not stuck on a policy rule or a flaky locator, it is stuck on a caller-supplied value that does not exist.
+3. **You act and report back.** Do the transfer by hand, type what you did, press Enter. Control returns and the run continues from the page you left it on.
+4. **Hardening**, which adds the business outcomes and detectors the happy path could not observe — `DESTINATION_ACCOUNT_NOT_FOUND`, `INSUFFICIENT_FUNDS`, a session-timeout recovery, and so on.
+5. **Verification refuses the recording:**
+
+```
+RECORDING DOES NOT MATCH THE APPROVED PLAN:
+  - parameter 'destination_account' was planned as an input but no recorded step references it — it is frozen as a constant
+  - parameter 'amount' was planned as an input but no recorded step references it — it is frozen as a constant
+
+SUCCESS in 8 steps (1 escalation(s)).
+Left as a draft: it did not match the approved plan.
+```
+
+That is the system working. The run *succeeded* — the money moved — but **the agent did not do the parameterised parts, you did**, and a human's handoff actions reach evidence without becoming replayable steps ([REPORT.md §7](REPORT.md)). So the artifact declares two inputs that no step consumes. Approving it would publish a capability whose `amount` and `destination_account` arguments are silently ignored.
+
+`--max-escalations` (default 2) bounds how many times one run may ask; the first attempt above hit the limit after two handovers for the same missing account.
+
+**Do not force this one:**
+
+```
+python -m cua approve demo_transfer@1.0.0            # refuses, listing both frozen parameters
+python -m cua approve demo_transfer@1.0.0 --force    # approves a capability whose inputs do nothing
+```
+
+`--force` exists for gaps a reviewer has read and accepted. Frozen parameters are not that — the resulting replay types a hardcoded amount, never touches the destination, and reads the page heading as its confirmation, which is the row at the bottom of the table above.
+
+**The fix is a better recording, not a forced approval.** Use a destination account that exists in the dropdown, and name both dropdowns and the submit button in the goal so the model records a step for each:
+
+```
+python -m cua discover "Log in with the given username and password, open the Transfer Funds page, select the source account in the From Account dropdown and the destination account in the To Account dropdown, enter the amount in the amount field, click the Transfer button, and read the transfer confirmation message" --url http://localhost:8080/parabank/index.htm --id demo_transfer --input username=john --input source_account=13344 --input destination_account=12345 --input amount=1 --secret password=demo --max-steps 15
+```
+
+Then approve without `--force`. If verification still reports a frozen parameter, the recording is still incomplete.
 
 ### Disclaimer
 
@@ -282,6 +403,8 @@ Covers the artifact schema contract, the policy gate, redaction, and the replay 
 | `--no-auto-approve` | always leave the recording as a draft |
 | `--non-interactive` | unattended replay: risky steps fail instead of prompting |
 | `--escalate-on-failure` | on an unanticipated replay failure, offer a handoff before giving up |
+| `--max-escalations` | how many handovers a stuck discovery run may ask for (default 2) |
+| `--no-escalate-policy-blocks` | do NOT hand over when POLICY is what stopped the agent (handover is on by default) |
 | `--allow-draft` | replay an unapproved artifact (for iterating) |
 | `--start-app` | start ParaBank via docker if it is not already up (`chat`, `ui`) |
 

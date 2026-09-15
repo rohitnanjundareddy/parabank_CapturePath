@@ -307,7 +307,8 @@ class DiscoveryAgent:
 
     def __init__(self, driver, policy: PolicyEngine, evidence, redactor,
                  *, model: str, max_steps: int = 25, escalation=None,
-                 plan=None,
+                 plan=None, max_escalations: int = 2,
+                 escalate_policy_blocks: bool = True,
                  operator_prompt: Optional[Callable[[str, str, bool], Optional[str]]] = None):
         self.driver = driver
         self.policy = policy
@@ -317,7 +318,15 @@ class DiscoveryAgent:
         self.max_steps = max_steps
         self.escalation = escalation
         self.plan = plan
+        self.max_escalations = max_escalations
+        self.escalate_policy_blocks = escalate_policy_blocks
         self.operator_prompt = operator_prompt
+        # Policy refusals since the agent last made progress. Non-empty at the
+        # moment it declares itself stuck means the gate is what stopped it.
+        self._blocked_by_policy: list[str] = []
+        # Normalized reasons already handed to an operator, so the same
+        # blocker cannot pull a human in twice.
+        self._escalated_reasons: list[str] = []
 
     def run(self, goal: str, url: str, params: dict, secrets: dict) -> DiscoveryOutcome:
         import anthropic
@@ -395,11 +404,15 @@ class DiscoveryAgent:
             if tool == "declare_stuck":
                 reason = tool_args.get("reason", "")
                 self.ev.event("stuck", reason=reason)
-                if self.escalation is None:
+                refusal = self._why_not_escalate(reason)
+                if refusal:
+                    self.ev.event("escalation_refused", reason=reason,
+                                  refusal=refusal)
                     outcome.steps_taken = step
-                    outcome.failure_reason = reason
+                    outcome.failure_reason = f"{reason}\n\n{refusal}"
                     return outcome
                 outcome.escalations += 1
+                self._escalated_reasons.append(" ".join(reason.lower().split()))
                 note = self.escalation.intervene(
                     context=reason, goal=goal, step=f"step {step}",
                     driver=self.driver, evidence=self.ev)
@@ -503,16 +516,86 @@ class DiscoveryAgent:
              "is_error": is_error},
         ]})
 
+    def _why_not_escalate(self, reason: str) -> Optional[str]:
+        """Should a human be pulled into this? Returns why not, or None.
+
+        Handing over the live browser is only worth an operator's time when a
+        human can actually clear the blocker. Two cases cannot be cleared that
+        way, and before this existed both produced the same symptom: the
+        operator asked to describe what they did, again and again, while
+        nothing about the agent's situation changed.
+
+        The first is not merely futile, it is a hole. When the gate refuses an
+        action and the agent then escalates, the operator is being asked to
+        perform by hand the exact action policy just refused -- and whatever
+        they do gets recorded as progress. A blocked transfer became a
+        human-performed transfer, of the wrong amount between the wrong
+        accounts, and the run carried on as though the flow had worked. A
+        BLOCK verdict is a deliberate, permanent refusal; routing around it
+        through a person is the one thing escalation must never do.
+        """
+        if self.escalation is None:
+            return "No operator is attached to this run."
+
+        if self._blocked_by_policy and not self.escalate_policy_blocks:
+            blocked = "; ".join(dict.fromkeys(self._blocked_by_policy))
+            return (
+                "NOT ESCALATED: the agent is stuck because policy refused its "
+                f"actions ({blocked}) -- not because it met something a human "
+                "could clear. Handing over the browser here would ask an "
+                "operator to perform by hand the action the gate just refused, "
+                "and the run would record a flow the policy forbids. If this "
+                "goal belongs in scope, widen config/policy.yaml deliberately "
+                "and re-run. If it does not, this refusal is the system "
+                "working as designed. Pass --escalate-policy-blocks to hand "
+                "over anyway: the operator then acts on their own authority, "
+                "and the recording still cannot be approved.")
+
+        normalized = " ".join(reason.lower().split())
+        if normalized in self._escalated_reasons:
+            return (
+                "NOT ESCALATED: the agent reported the same blocker it "
+                "reported before the last handover, so the intervention did "
+                "not change what it is able to do. Asking again would only "
+                "repeat the question.")
+
+        if len(self._escalated_reasons) >= self.max_escalations:
+            return (
+                f"NOT ESCALATED: the escalation budget of "
+                f"{self.max_escalations} is spent and the agent is still "
+                f"stuck. Raise it with --max-escalations if more handovers "
+                f"are genuinely useful here.")
+
+        return None
+
+    #: Actions that cannot commit state whatever their label says: loading a
+    #: page and reading text change nothing. A forbidden destination is the
+    #: job of `blocked_url_patterns`, which still applies to navigate.
+    _CANNOT_COMMIT = ("navigate", "extract")
+
     def _policy_gate(self, tool: str, description: str,
-                     risk: RiskLevel = RiskLevel.SAFE):
+                     risk: RiskLevel = RiskLevel.SAFE,
+                     commits: Optional[bool] = None,
+                     url: Optional[str] = None):
         """Returns (allowed, message_if_not). Identical enforcement to replay:
         every proposed action goes through PolicyEngine.check() before the
-        driver ever sees it."""
+        driver ever sees it.
+
+        `url` is what policy judges. For a navigation that is the DESTINATION,
+        which is the rule replay already applies -- judging the page we happen
+        to be standing on instead would let the agent walk onto any blocked
+        route it likes and only discover the route is forbidden once it is
+        already there, with every subsequent action refused for a reason that
+        looks like it is about the action rather than the address. For every
+        other action the current page IS the address being acted upon.
+        """
         decision = self.policy.check(ProposedAction(
-            tool, url=self.driver.current_url(),
-            target_description=description, risk=risk))
+            tool, url=url or self.driver.current_url(),
+            target_description=description, risk=risk,
+            commits=False if tool in self._CANNOT_COMMIT else commits))
         if decision.verdict == Verdict.BLOCK:
             self.ev.event("policy_block", tool=tool, reason=decision.reason)
+            self._blocked_by_policy.append(decision.reason)
             return False, f"blocked by policy: {decision.reason}"
         if decision.verdict == Verdict.CONFIRM:
             approved = (self.escalation.confirm(f"{tool} '{description}': {decision.reason}")
@@ -549,7 +632,12 @@ class DiscoveryAgent:
 
         allowed, message = self._policy_gate(
             tool, description,
-            risk=RiskLevel.RISKY if submits else RiskLevel.SAFE)
+            risk=RiskLevel.RISKY if submits else RiskLevel.SAFE,
+            # For a click the driver gives a definitive structural answer, so
+            # pass it. For anything else it has not been asked, and `None`
+            # keeps the label backstop switched on.
+            commits=submits if (tool == "click" and ref) else None,
+            url=args.get("url") if tool == "navigate" else None)
         if not allowed:
             return message, None
 
@@ -583,6 +671,9 @@ class DiscoveryAgent:
                 tool, args, description=description, ok=False, error=str(exc))
 
         after_url = self.driver.current_url()
+        # The agent got somewhere, so whatever the gate refused earlier is no
+        # longer what is standing in its way.
+        self._blocked_by_policy.clear()
 
         # What did this action put on screen that was not there before? For a
         # same-URL postback that is the only signal replay can wait on.

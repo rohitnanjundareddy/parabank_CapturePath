@@ -39,6 +39,14 @@ class ProposedAction:
     action_type: str                 # click | type | select | navigate | extract | press
     url: Optional[str] = None        # current or destination URL
     target_description: str = ""
+    # Did the caller structurally determine whether this action commits state?
+    #   True  - it really is the control that submits (driver.submits_ref)
+    #   False - it structurally cannot commit: a link, a page load, a read
+    #   None  - nobody looked (e.g. a legacy artifact); the label backstop applies
+    # Three states, not two, because "known not to commit" and "unknown" must
+    # not be conflated: collapsing them either re-opens this false positive or
+    # silently drops the backstop that protects older recordings.
+    commits: Optional[bool] = None
     risk: RiskLevel = RiskLevel.SAFE
 
 
@@ -64,7 +72,29 @@ class PolicyEngine:
     # -- classification -----------------------------------------------------
 
     def classify_risk(self, action: ProposedAction) -> RiskLevel:
-        """Effective risk = max(declared risk, pattern-inferred risk)."""
+        """Effective risk = max(declared risk, pattern-inferred risk).
+
+        The description patterns are a BACKSTOP, not the primary signal. They
+        read a control's label, and a label is the one thing a vendor renames
+        per tenant -- which is why commits are detected structurally instead,
+        and why these patterns only ever tighten.
+
+        A label cannot, however, be allowed to invent a commit out of an
+        action that structurally cannot perform one. Matching on description
+        alone classified "Transfer Funds link in the navigation menu" as
+        irreversible and refused the agent the PAGE rather than the payment:
+        the same proxy failure that emptied `risky_target_patterns`, where an
+        "Open New Account link" turned a page change into a state change.
+
+        So inference is skipped when the caller has established the action
+        commits nothing. It still runs when nobody looked (`commits=None`),
+        because an artifact recorded before structural detection existed
+        carries risk=safe on its submits and has only this backstop.
+        """
+        if action.commits is False:
+            # Declared risk still stands: this narrows what may be INFERRED,
+            # and never downgrades what a caller or an artifact asserted.
+            return action.risk
         text = action.target_description.lower()
         inferred = RiskLevel.SAFE
         if any(re.search(p, text) for p in self.risky_target_patterns):

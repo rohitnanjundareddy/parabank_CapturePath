@@ -219,10 +219,16 @@ class ReplayEngine:
         policy_url = (substitute(step.url, params)
                       if isinstance(step, NavigateStep)
                       else self.driver.current_url())
+        action_type = getattr(step, "action", "click")
         decision = self.policy.check(ProposedAction(
-            getattr(step, "action", "click"),
+            action_type,
             url=policy_url,
-            target_description=step.description, risk=step.risk))
+            target_description=step.description, risk=step.risk,
+            # A page load and a read commit nothing, however old the
+            # recording. A click's structural verdict was frozen into
+            # step.risk at record time, but a legacy recording cannot be told
+            # apart from a genuinely safe one, so it keeps the backstop.
+            commits=False if action_type in ("navigate", "extract") else None))
         if decision.verdict == Verdict.BLOCK:
             self._fail(result, step.id, expected="action within policy",
                        observed=f"blocked: {decision.reason}")

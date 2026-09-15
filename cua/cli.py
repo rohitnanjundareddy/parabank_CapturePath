@@ -94,6 +94,16 @@ def discover(
     policy: str = typer.Option("config/policy.yaml"),
     model: str = typer.Option("claude-sonnet-4-6"),
     max_steps: int = typer.Option(25),
+    max_escalations: int = typer.Option(
+        2, help="How many times a stuck agent may hand the browser to a "
+                "human before the run gives up."),
+    escalate_policy_blocks: bool = typer.Option(
+        True, "--escalate-policy-blocks/--no-escalate-policy-blocks",
+        help="Hand the browser to a human when the agent is stuck because "
+             "POLICY refused it. On by default: the gate stops AUTOMATION, "
+             "and an attended operator may still act on their own authority. "
+             "Bounded by --max-escalations either way. Use "
+             "--no-escalate-policy-blocks for unattended or hands-off runs."),
     headless: bool = typer.Option(False),
     plan: bool = typer.Option(True, help="Propose a plan for human approval "
                                          "before touching the browser"),
@@ -238,10 +248,19 @@ def discover(
         agent = DiscoveryAgent(driver, PolicyEngine.from_yaml(policy), ev,
                                redactor, model=model, max_steps=max_steps,
                                escalation=esc, plan=approved_plan,
+                               max_escalations=max_escalations,
+                               escalate_policy_blocks=escalate_policy_blocks,
                                operator_prompt=_ask_operator)
         outcome = agent.run(goal, url, params, secrets)
         if not outcome.success:
-            typer.echo(f"Discovery did not succeed. Evidence: {ev.dir}")
+            # Print WHY. A bare "did not succeed" sends the operator digging
+            # through evidence for something the run already knows -- and when
+            # the cause is a deliberate policy refusal, that is the one line
+            # they need in order to stop retrying it.
+            typer.echo("\nDiscovery did not succeed.")
+            if outcome.failure_reason:
+                typer.echo(f"\n{outcome.failure_reason}")
+            typer.echo(f"\nEvidence: {ev.dir}")
             raise typer.Exit(1)
 
         try:
@@ -317,12 +336,19 @@ def discover(
             # The step's DECLARED risk has to go in, or a submit the recorder
             # correctly marked risky reads as safe here and the "verification"
             # goes and files the loan application it was meant to avoid.
+            # Same classification rule the gate applies, or the two disagree:
+            # a navigate step merely DESCRIBED as "the Transfer Funds page"
+            # would read as state-changing here and block auto-approval of a
+            # capability that commits nothing.
             changes_state = [
                 s.id for s in artifact.steps
                 if pol.classify_risk(ProposedAction(
                     getattr(s, "action", "click"),
                     target_description=s.description,
-                    risk=s.risk)) != RiskLevel.SAFE]
+                    risk=s.risk,
+                    commits=(False if getattr(s, "action", "click")
+                             in ("navigate", "extract") else None),
+                )) != RiskLevel.SAFE]
             if changes_state:
                 # Replaying would repeat a state-changing action (a transfer,
                 # an application). Verifying must not itself be an act with

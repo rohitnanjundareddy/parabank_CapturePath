@@ -18,7 +18,6 @@ allowed_actions:
 blocked_url_patterns:
   - "/admin\\.htm"
   - "/shutdown"
-  - "/transfer\\.htm"
   - "/billpay\\.htm"
 
 # Target-description patterns used to infer risk when a step is not
@@ -38,10 +37,25 @@ blocked_url_patterns:
 # NOTE: this backstop only protects artifacts recorded WITH structural
 # detection. An artifact recorded before it carries risk=safe on its
 # submits — which is why the shipped artifacts are recorded with current code.
+#
+# Both pattern lists below are applied ONLY to an action that is known to
+# commit state, or whose commit-ness was never determined. An action the
+# caller established cannot commit — a link, a page load, a read — is not
+# classified from its label at all. Without that rule the proxy fails the
+# same way a second time: a navigation link reading "Transfer Funds link"
+# matches `transfer`, and the agent is refused the PAGE rather than the
+# payment. Refusing a destination is what blocked_url_patterns is for, and
+# it still applies to navigation.
 risky_target_patterns: []
 
+# Transfers were removed from this list and from blocked_url_patterns so the
+# flow can be DISCOVERED and recorded. Only the agent's own actions become
+# replayable steps — a human's handoff actions reach evidence and stop there
+# (REPORT.md §7) — so a capability the agent is forbidden to perform is a
+# capability that cannot be recorded at all. The commit itself is still
+# caught: the submit control is detected structurally at record and replay
+# time and asks an operator before it fires.
 irreversible_target_patterns:
-  - "transfer"
   - "pay.*bill"
   - "delete"
 
