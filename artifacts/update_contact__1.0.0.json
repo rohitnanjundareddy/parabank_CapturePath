@@ -1,0 +1,505 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "update_contact",
+  "version": "1.0.0",
+  "name": "update_contact",
+  "description": "Log in with the given username and password, open the Update Contact Info page, replace the phone number with the given phone number and the city with the given city, click Update Profile, and read the confirmation message into an output named confirmation",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-09-16T00:53:45.616980Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260916-005227-fd4cca",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password, open the Update Contact Info page, replace the phone number with the given phone number and the city with the given city, click Update Profile, and read the confirmation message into an output named confirmation",
+      "steps": [
+        {
+          "intent": "Log in with the supplied username and password and reach the Accounts Overview page",
+          "action": "Replay reusable fragment parabank_login@1.0.0 with username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Update Contact Info page",
+          "action": "Locate and click the 'Update Contact Info' link in the user navigation menu",
+          "uses": []
+        },
+        {
+          "intent": "Replace the phone number field with the supplied phone number",
+          "action": "Clear the existing phone number field and type the supplied phone_number value",
+          "uses": []
+        },
+        {
+          "intent": "Replace the city field with the supplied city",
+          "action": "Clear the existing city field and type the supplied city value",
+          "uses": []
+        },
+        {
+          "intent": "Submit the contact info update",
+          "action": "Click the 'Update Profile' button",
+          "uses": []
+        },
+        {
+          "intent": "Read the confirmation message from the page into the output named confirmation",
+          "action": "Capture the confirmation message text displayed on the page after the update",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "phone_number",
+          "description": "The new phone number to set in the Update Contact Info form",
+          "example": "5551234567",
+          "sensitive": false
+        },
+        {
+          "name": "city",
+          "description": "The new city to set in the Update Contact Info form",
+          "example": "Chicago",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "confirmation"
+      ],
+      "success_signal": "A confirmation message heading or text (e.g. \"Profile Updated\" or \"Your updated address has been added to the system.\") is visible on the page after clicking Update Profile",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [
+      "s02_click: detector 'd03_update_contact_not_found' rejected: 'Update Contact Info' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one",
+      "s10_extract: detector 'd06_confirmation_not_found' rejected: 'Profile Updated' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
+    "partial_reason": null,
+    "smoke_replay": "skipped: state-changing steps",
+    "review_notes": [
+      "s09_click: only one locator candidate (role_name) — no fallback if it stops matching",
+      "s10_extract: only one locator candidate (text) — no fallback if it stops matching"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "phone_number",
+      "type": "string",
+      "description": "The new phone number to set in the Update Contact Info form",
+      "required": true,
+      "sensitive": false,
+      "example": "5551234567"
+    },
+    {
+      "name": "city",
+      "type": "string",
+      "description": "The new city to set in the Update Contact Info form",
+      "required": true,
+      "sensitive": false,
+      "example": "Chicago"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "confirmation",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "The supplied username or password was not accepted by ParaBank; login failed."
+    },
+    {
+      "code": "CONTACT_INFO_PAGE_NOT_ACCESSIBLE",
+      "description": "The Update Contact Info page could not be reached, likely because the session did not establish correctly after login."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "d01_login_failed",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error!",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "Login failed: the username or password was rejected by ParaBank. Verify credentials and retry."
+          }
+        },
+        {
+          "id": "d02_session_timeout",
+          "when": {
+            "kind": "text_visible",
+            "value": "session",
+            "scope": null
+          },
+          "then": {
+            "type": "recover",
+            "remedy": "retry",
+            "dismiss_target": null,
+            "max_attempts": 2,
+            "backoff_ms": 1000
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Update Contact Info link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/updateprofile.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Update Contact Info link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Update Contact Info",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"updateprofile.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_click",
+      "description": "Phone number input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Phone number input field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Phone #:||td:nth-child(2) input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"Phone #:\") + td input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.phoneNumber",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s05_type",
+      "description": "Phone number input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Phone number input field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Phone #:||td:nth-child(2) input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"Phone #:\") + td input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.phoneNumber",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.phoneNumber\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{phone_number}}",
+      "sensitive": false
+    },
+    {
+      "id": "s06_click",
+      "description": "City input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "City input field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "City:||td:nth-child(2) input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"City:\") + td input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.address\\.city",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s08_type",
+      "description": "City input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "City input field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "City:||td:nth-child(2) input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"City:\") + td input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#customer\\.address\\.city",
+            "role": null,
+            "rationale": "structural fallback"
+          },
+          {
+            "strategy": "css",
+            "value": "input[name=\"customer.address.city\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{city}}",
+      "sensitive": false
+    },
+    {
+      "id": "s09_click",
+      "description": "Update Profile button",
+      "risk": "risky",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Profile Updated",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "d04_internal_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank reported an internal server error when submitting the profile update. Check server logs."
+          }
+        },
+        {
+          "id": "d05_generic_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error!",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank returned an error page after clicking Update Profile. The form submission was rejected; inspect the error detail."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Update Profile button",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Update Profile",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s10_extract",
+      "description": "Confirmation message heading after profile update",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Profile Updated",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Confirmation message heading after profile update",
+        "candidates": [
+          {
+            "strategy": "text",
+            "value": "Profile Updated",
+            "role": null,
+            "rationale": "visible text, last resort"
+          }
+        ]
+      },
+      "output": "confirmation",
+      "parse": "text",
+      "on_empty": null
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Profile Updated",
+      "scope": null
+    }
+  }
+}

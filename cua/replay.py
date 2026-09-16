@@ -40,6 +40,7 @@ from .schemas import (
     StepReport,
     TypeStep,
 )
+from .driver import NotReadableAsData, OptionNotFound
 from .store import ArtifactStore
 
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")
@@ -54,6 +55,42 @@ class _Unreadable(Exception):
     parse. Reading a whole transaction table and typing it as one currency
     amount produced exactly that: a parse error reported as "this account
     has no transactions", with twelve of them on screen.
+    """
+
+
+def _asks_for_a_caller_value(step) -> bool:
+    """Is this step's element identified by something the caller supplied?
+
+    Checked against the UNSUBSTITUTED target, because after substitution a
+    placeholder and a literal look alike. If the ladder that failed was
+    written in terms of {{account_id}}, then the most likely reason it found
+    nothing is that the caller asked for a record that is not there -- which
+    is an answer to return, not a reason to summon a person.
+    """
+    # A select carries the caller's value in `value`, not in the ladder: the
+    # dropdown is found by a fixed selector and the ACCOUNT is what is being
+    # picked. Missing that was why a bad account number still summoned a
+    # person -- the target looked like nobody's request.
+    if isinstance(step, SelectStep) and _PLACEHOLDER.search(step.value or ""):
+        return True
+    target = getattr(step, "target", None)
+    if target is None:
+        return False
+    return any(_PLACEHOLDER.search(c.value or "") for c in target.candidates)
+
+
+class _Empty(Exception):
+    """The element WAS found and contained nothing.
+
+    Separate from exhaustion because the two support different claims. An
+    empty transaction table is a fact about the account -- no transactions in
+    that range, which is an answer. A table that is not there at all is a fact
+    about the recording, and calling that "no transactions" hands the caller a
+    confident wrong answer.
+
+    A step says which it means through `on_empty`; without one this falls back
+    to `on_exhausted`, so artifacts recorded before the distinction existed
+    behave exactly as they did.
     """
 
 
@@ -146,15 +183,22 @@ def _parse(value: str, mode: str) -> str | float:
 class ReplayEngine:
     def __init__(self, driver, policy: PolicyEngine, store: ArtifactStore,
                  evidence: EvidenceLog, escalation=None,
-                 escalate_on_failure: bool = False):
+                 escalate_on_failure: bool = True):
         self.driver, self.policy = driver, policy
         self.store, self.ev = store, evidence
         self.escalation = escalation
-        # Opt-in fallback for a hard failure the artifact did not anticipate
-        # (no matching detector, no declared escalate): offer a human one
-        # handoff before giving up, instead of ending the run. Declared
-        # EscalateAction steps and policy BLOCKs are unaffected by this flag
-        # — a block is a deliberate safety decision, not an anticipation gap.
+        # When a step exhausts its recovery budget and the artifact declared
+        # nothing for that case, ask the operator before giving up rather than
+        # ending the run. On by default: an attended run that dies on a step a
+        # person could have cleared in five seconds wastes the person, and the
+        # artifact's silence about a failure means it was never anticipated —
+        # not that a human is unwelcome.
+        #
+        # Three things are deliberately unaffected. An unattended run never
+        # hands over (there is nobody there, and `intervene` would auto-resume
+        # into a no-op). A policy BLOCK is a deliberate safety decision, not an
+        # anticipation gap. And a declared EscalateAction already hands over
+        # regardless of this setting.
         self.escalate_on_failure = escalate_on_failure
 
     def run(self, ref: str, params: dict[str, str],
@@ -290,12 +334,25 @@ class ReplayEngine:
                               error=str(e))
                 action = self._check_detectors(step, params, result,
                                                recover_budget) \
+                    or (isinstance(e, _Empty)
+                        and getattr(step, "on_empty", None)) \
+                    or (isinstance(e, OptionNotFound)
+                        and getattr(step, "on_value_absent", None)) \
                     or step.on_exhausted
                 # on_exhausted declares what ABSENCE means. If the element was
                 # found and only its content defeated us, reporting "not
                 # found" would hand the caller a confident wrong answer — a
                 # table of twelve transactions reported as "no transactions".
-                if isinstance(e, _Unreadable) and isinstance(action, OutcomeAction):
+                #
+                # A recording aimed at the wrong KIND of element is the same
+                # mistake one level up, and worse in its consequences: the
+                # open-account capability reads its confirmation off a
+                # dropdown, so a refusal to read it became "ACCOUNT_OPEN_FAILED"
+                # — reported to the caller as a business outcome while the
+                # account had in fact just been opened. A defect in the
+                # artifact is never an answer about the world.
+                if (isinstance(e, (_Unreadable, NotReadableAsData))
+                        and isinstance(action, OutcomeAction)):
                     action = FailAction(message=str(e))
                 if isinstance(action, RecoverAction):
                     budget_key = f"{step.id}:{action.remedy}"
@@ -307,12 +364,27 @@ class ReplayEngine:
                         continue
                     action = step.on_exhausted  # ladder exhausted, next layer
 
-                # An unattended failure the artifact never anticipated: offer
-                # one human handoff before giving up, if the operator opted
-                # in. A declared EscalateAction is untouched by this — it
-                # already gets a handoff below regardless of the flag.
+                # A failure the artifact never anticipated: offer one human
+                # handoff before giving up, if an operator is attached. A
+                # declared EscalateAction is untouched by this -- it already
+                # gets a handoff below regardless.
+                #
+                # Except when the caller's own value is what is missing. A
+                # step targeted through {{account_id}} that resolves nothing
+                # is most likely being asked for a record this surface does
+                # not have, and no operator can make account 99999 exist.
+                # Interrupting a person to tell them that wastes them and
+                # leaves the caller waiting for an answer the run already
+                # has. (Same judgement harden.py applies when deciding which
+                # steps may report a business outcome: "{{account_id}} is
+                # absent" is a fact about the request, "some button is
+                # missing" is a broken recording.)
                 if (isinstance(action, FailAction) and self.escalate_on_failure
-                        and self.escalation is not None and not escalated):
+                        and self.escalation is not None and not escalated
+                        and getattr(self.escalation, "interactive", True)
+                        and not isinstance(e, (OptionNotFound,
+                                              NotReadableAsData))
+                        and not _asks_for_a_caller_value(step)):
                     action = EscalateAction(reason=action.message)
 
                 if isinstance(action, EscalateAction):
@@ -399,7 +471,7 @@ class ReplayEngine:
                 # answer that looks authoritative; route it through the step's
                 # declared error handling instead, where an empty read is
                 # usually a business outcome ("no such row") rather than data.
-                raise ValueError(
+                raise _Empty(
                     f"'{step.output}' resolved an element but it contained no text")
             try:
                 result.outputs[step.output] = _parse(text, step.parse)

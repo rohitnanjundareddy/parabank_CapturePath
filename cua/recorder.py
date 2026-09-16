@@ -21,14 +21,17 @@ from urllib.parse import urlparse
 
 from .discovery import DiscoveryOutcome
 from .schemas import (
+    ApprovalStatus,
     Artifact,
     ArtifactKind,
+    BusinessOutcomeDecl,
     Checkpoint,
     ClickStep,
     DetectorMatch,
     ExtractStep,
     InputParam,
     NavigateStep,
+    OutcomeAction,
     OutputField,
     ParamType,
     Provenance,
@@ -75,6 +78,22 @@ def _url_wait(entry, params: dict[str, str], secrets: dict[str, str]):
     return None
 
 
+def _is_collection(sample: str) -> bool:
+    """Does this reading look like a list of things rather than one value?
+
+    Rows and cells are the tell: newlines or tabs, or more than one amount.
+    Used twice, and the second use is why it is worth naming. Typing decides
+    whether a reading is a number; `on_empty` decides what NOTHING means, and
+    the answer differs for the same reason. An empty collection is a real
+    answer -- the account has no transactions in that range. An empty scalar
+    is a broken page: a balance cell that exists and is blank is not a bank
+    telling you something, it is a reading that should not be trusted.
+    """
+    s = (sample or "").strip()
+    return ("\n" in s or "\t" in s
+            or len(re.findall(r"[$€£]\s?[\d,]", s)) > 1)
+
+
 def _infer_output(sample: str) -> tuple[ParamType, str]:
     """Type an output from what was actually read off the page.
 
@@ -93,7 +112,7 @@ def _infer_output(sample: str) -> tuple[ParamType, str]:
     than one amount, is a table and stays text.
     """
     s = (sample or "").strip()
-    looks_like_a_collection = ("\n" in s or "\t" in s
+    looks_like_a_collection = (_is_collection(s)
                                or len(re.findall(r"[$€£]\s?[\d,]", s)) > 1)
     if (not looks_like_a_collection
             and re.search(r"[$€£]", s) and re.search(r"\d", s)):
@@ -133,8 +152,14 @@ def record(outcome: DiscoveryOutcome, *, artifact_id: str, name: str,
            description: str, app: str, goal: str, entry_url: str,
            params: dict[str, str], secrets: dict[str, str],
            run_id: str, model: str, version: str = "1.0.0",
-           plan=None, kind=None, prefix_subflows=None) -> Artifact:
-    if not outcome.success:
+           plan=None, kind=None, prefix_subflows=None,
+           partial_reason: str = "") -> Artifact:
+    """`partial_reason` records a run that did NOT reach its goal, keeping the
+    path it did explore so a reviewer can replay it and decide whether to
+    finish it. It is always a draft, and the caller must say why -- a partial
+    recorded silently is indistinguishable from a working capability, which is
+    the confusion this whole pipeline exists to prevent."""
+    if not outcome.success and not partial_reason:
         raise ValueError("refusing to record a failed discovery run")
 
     # Chunks that were REPLAYED rather than discovered (see cli.py's reuse
@@ -161,6 +186,10 @@ def record(outcome: DiscoveryOutcome, *, artifact_id: str, name: str,
                   and last_writer[e.args["output"]] != i}
 
     steps: list[Step] = list(prefix_steps)
+    # Outcomes implied by the steps themselves. A capability that can come
+    # back empty has to SAY so in its contract, or the caller has no reason
+    # to handle it.
+    collection_outcomes: list[BusinessOutcomeDecl] = []
     n = 0
     for idx, e in enumerate(outcome.transcript):
         if not e.ok or idx in superseded:
@@ -202,13 +231,55 @@ def record(outcome: DiscoveryOutcome, *, artifact_id: str, name: str,
             steps.append(TypeStep(**common, target=_param_target(e.target, params, secrets),
                                   value=value, sensitive=sensitive))
         elif e.tool == "select" and e.target:
+            picked = _parameterize(e.args["value"], params, secrets)
+            # If the caller chooses this option, then an option that is not
+            # there is an answer about their data, not a broken page. Say so
+            # in the contract, or replay has nowhere to put "no such account"
+            # and falls back to reporting a fault.
+            absent = None
+            m = re.fullmatch(r"\{\{(\w+)\}\}", picked.strip())
+            if m:
+                pname = m.group(1)
+                code = "NO_SUCH_" + re.sub(r"[^A-Z0-9]+", "_",
+                                           pname.upper()).strip("_")
+                absent = OutcomeAction(
+                    code=code,
+                    message=(f"The {{{{{pname}}}}} supplied is not among the "
+                             f"options offered here, so there is no such "
+                             f"record to act on."))
+                if code not in {o.code for o in collection_outcomes}:
+                    collection_outcomes.append(BusinessOutcomeDecl(
+                        code=code,
+                        description=f"The supplied {pname} does not exist on "
+                                    f"this surface."))
             steps.append(SelectStep(**common, target=_param_target(e.target, params, secrets),
-                                    value=_parameterize(e.args["value"], params, secrets)))
+                                    value=picked, on_value_absent=absent))
         elif e.tool == "extract" and e.target:
             out_name = e.args["output"]
-            _, parse_mode = _infer_output(outcome.outputs.get(out_name, ""))
+            sample = outcome.outputs.get(out_name, "")
+            _, parse_mode = _infer_output(sample)
+            # What does reading NOTHING out of this element mean? For a
+            # collection it means the collection is empty, which is an answer
+            # the caller asked for: no transactions in that range. For a
+            # single value it means a field that should hold something does
+            # not, which is a reading not to be trusted -- so that case is
+            # left to on_exhausted, and stays a failure.
+            on_empty = None
+            if _is_collection(sample):
+                code = "NO_" + re.sub(r"[^A-Z0-9]+", "_", out_name.upper()).strip("_")
+                on_empty = OutcomeAction(
+                    code=code,
+                    message=(f"The page showed the {out_name} area with nothing "
+                             f"in it, so there are none to report for these "
+                             f"inputs. This is an answer, not a failure."))
+                if code not in {o.code for o in collection_outcomes}:
+                    collection_outcomes.append(BusinessOutcomeDecl(
+                        code=code,
+                        description=f"No {out_name} were present for the "
+                                    f"supplied inputs."))
             steps.append(ExtractStep(**common, target=_param_target(e.target, params, secrets),
-                                     output=out_name, parse=parse_mode))
+                                     output=out_name, parse=parse_mode,
+                                     on_empty=on_empty))
 
     # The final step waits for the proof text: replay then verifies the same
     # condition the model proved success with.
@@ -276,16 +347,40 @@ def record(outcome: DiscoveryOutcome, *, artifact_id: str, name: str,
         kind=kind or ArtifactKind.CAPABILITY,
         id=artifact_id, version=version, name=name,
         description=description or goal, app=app,
+        status=ApprovalStatus.DRAFT,
         provenance=Provenance(discovery_run_id=run_id, model=model,
-                              review_notes=notes),
+                              review_notes=notes,
+                              partial_reason=partial_reason or None),
         inputs=inputs, outputs=outputs,
+        business_outcomes=collection_outcomes,
         steps=steps,
         success=Checkpoint(
             id="goal_proof",
             description="Text the discovery model proved success with",
             match=DetectorMatch(kind="text_visible",
-                                value=_parameterize(outcome.proof_text, params, secrets))),
+                                value=_parameterize(_goal_proof(outcome), params, secrets))),
     )
+
+
+def _goal_proof(outcome: DiscoveryOutcome) -> str:
+    """What the success checkpoint asserts.
+
+    A successful run proved something and that text is the checkpoint. A
+    PARTIAL never reached the goal, so there is no proof -- and an empty
+    checkpoint is the worst possible answer, because "" is visible on every
+    page and the artifact would report success from anywhere. Assert the last
+    state it genuinely reached instead, so replaying a partial tells you how
+    far the path actually gets.
+    """
+    if outcome.proof_text:
+        return outcome.proof_text
+    for text in outcome.final_texts:
+        candidate = (text or "").strip()
+        if len(candidate) >= 4 and not candidate.isdigit():
+            return candidate
+    raise ValueError(
+        "cannot record: the run reached no state worth asserting, so the "
+        "artifact would have no checkpoint and would 'succeed' anywhere")
 
 
 def _param_target(target, params, secrets):

@@ -189,9 +189,16 @@ class TypeStep(BaseStep):
 
 
 class SelectStep(BaseStep):
+    # Same shape as ExtractStep.on_empty: the control WAS found, the caller's
+    # data was not in it. "Account 99999 is not in the dropdown" is an answer;
+    # "the dropdown is gone" is a fault, and that stays with on_exhausted.
+    # Unset falls back to on_exhausted, so older artifacts are unchanged.
     action: Literal["select"] = "select"
     target: Target
     value: str
+    on_value_absent: Optional[DetectorAction] = Field(
+        default=None,
+        description="What an absent option means. Falls back to on_exhausted.")
 
 
 class ExtractStep(BaseStep):
@@ -199,6 +206,18 @@ class ExtractStep(BaseStep):
     target: Target
     output: str = Field(description="Name of the declared output this fills")
     parse: Literal["text", "number", "currency"] = "text"
+    # "I found the thing and it is empty" is a different claim from "I could
+    # not find the thing", and only the first is safe to call a result. An
+    # empty transaction table means the account has no transactions in that
+    # range -- a legitimate answer. A missing table means the recording no
+    # longer matches the page, and reporting THAT as "no transactions" is the
+    # confident wrong answer this schema exists to prevent.
+    #
+    # `on_exhausted` covers the second. This covers the first. Left unset it
+    # falls back to `on_exhausted`, so older artifacts behave as they did.
+    on_empty: Optional[DetectorAction] = Field(
+        default=None,
+        description="What an empty read means. Falls back to on_exhausted.")
 
 
 class RunSubflowStep(BaseStep):
@@ -294,6 +313,11 @@ class Provenance(BaseModel):
     # itself so a reviewer can see what was tried and discarded, not just
     # what survived.
     hardening_rejected: list[str] = Field(default_factory=list)
+    # Set when the run did NOT reach its goal and this artifact records only
+    # the path it managed. A partial is always a draft: it is kept so a
+    # reviewer can replay what was explored and decide whether to finish it,
+    # not because it is usable as it stands.
+    partial_reason: Optional[str] = None
     # Result of replaying this artifact once, immediately after recording,
     # before it was allowed to be approved. "A run succeeded" and "the
     # artifact of that run replays" are different claims; only this one

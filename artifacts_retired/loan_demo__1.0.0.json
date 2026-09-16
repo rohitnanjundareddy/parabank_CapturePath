@@ -1,0 +1,451 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "loan_demo",
+  "version": "1.0.0",
+  "name": "loan_demo",
+  "description": "Log in with the given username and password, open the Request Loan page, enter the loan amount and the down payment, select the funding account in the From Account dropdown, click Apply Now, and read the loan application status",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-09-15T16:52:01.299185Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260915-164901-891eac",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password, open the Request Loan page, enter the loan amount and the down payment, select the funding account in the From Account dropdown, click Apply Now, and read the loan application status",
+      "steps": [
+        {
+          "intent": "Log in with the supplied username and password and reach the Accounts Overview page",
+          "action": "Replay the parabank_login@1.0.0 fragment using the provided username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Request Loan page",
+          "action": "Click the 'Request Loan' link in the navigation menu",
+          "uses": []
+        },
+        {
+          "intent": "Enter the loan amount",
+          "action": "Locate the Loan Amount input field and type the value of loan_amount",
+          "uses": []
+        },
+        {
+          "intent": "Enter the down payment",
+          "action": "Locate the Down Payment input field and type the value of down_payment",
+          "uses": []
+        },
+        {
+          "intent": "Select the funding account in the From Account dropdown",
+          "action": "Open the 'From Account' dropdown and select the option matching funding_account",
+          "uses": []
+        },
+        {
+          "intent": "Submit the loan application",
+          "action": "Click the 'Apply Now' button",
+          "uses": []
+        },
+        {
+          "intent": "Read the loan application status",
+          "action": "Locate and capture the loan application status text displayed on the confirmation/result page",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "loan_amount",
+          "description": "The loan amount to request",
+          "example": "1500",
+          "sensitive": false
+        },
+        {
+          "name": "down_payment",
+          "description": "The down payment amount for the loan",
+          "example": "250",
+          "sensitive": false
+        },
+        {
+          "name": "funding_account",
+          "description": "The account number to select in the From Account dropdown to fund the loan",
+          "example": "99999",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "loan_application_status"
+      ],
+      "success_signal": "The loan application result page is displayed, showing a loan application status message (e.g. \"Approved\" or \"Denied\") under a heading such as \"Loan Request Processed\"",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [
+      "parameter 'funding_account' was planned as an input but no recorded step references it — it is frozen as a constant"
+    ],
+    "hardening_rejected": [
+      "s03_type: detector 'loan_amount_field_missing' rejected: 'Request Loan' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one",
+      "s06_extract: detector 'loan_denied' rejected: 'Denied' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
+    "smoke_replay": null,
+    "review_notes": []
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "loan_amount",
+      "type": "string",
+      "description": "The loan amount to request",
+      "required": true,
+      "sensitive": false,
+      "example": "1500"
+    },
+    {
+      "name": "down_payment",
+      "type": "string",
+      "description": "The down payment amount for the loan",
+      "required": true,
+      "sensitive": false,
+      "example": "250"
+    },
+    {
+      "name": "funding_account",
+      "type": "string",
+      "description": "The account number to select in the From Account dropdown to fund the loan",
+      "required": true,
+      "sensitive": false,
+      "example": "99999"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "available_accounts",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    },
+    {
+      "name": "loan_application_status",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "LOAN_DENIED",
+      "description": "The loan application was submitted and processed but the lender denied it. The caller must handle this as a valid, non-exceptional outcome."
+    },
+    {
+      "code": "INVALID_CREDENTIALS",
+      "description": "The supplied username and/or password were rejected at login."
+    },
+    {
+      "code": "FUNDING_ACCOUNT_NOT_FOUND",
+      "description": "The requested funding_account value does not appear in the From Account dropdown options."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "login_credentials_rejected",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "INVALID_CREDENTIALS",
+            "message": "Login failed: the supplied username or password was not accepted by ParaBank."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Request Loan link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/requestloan.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "request_loan_page_not_accessible",
+          "when": {
+            "kind": "text_visible",
+            "value": "An internal error has occurred and has been logged.",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "Navigation to the Request Loan page failed with an application error. Cannot continue."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Request Loan link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Request Loan",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"requestloan.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_type",
+      "description": "Loan Amount input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Loan Amount input field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Loan Amount: $||td:nth-child(2) input",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"Loan Amount: $\") + td input",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#amount",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{loan_amount}}",
+      "sensitive": false
+    },
+    {
+      "id": "s04_type",
+      "description": "Down Payment input field",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Down Payment input field",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Down Payment: $||td:nth-child(2) input",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"Down Payment: $\") + td input",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#downPayment",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{down_payment}}",
+      "sensitive": false
+    },
+    {
+      "id": "s05_extract",
+      "description": "From Account dropdown options",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "no_accounts_available",
+          "when": {
+            "kind": "text_visible",
+            "value": "No accounts found",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "The From Account dropdown contains no selectable accounts. The user may have no eligible funding accounts."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "business_outcome",
+        "code": "FUNDING_ACCOUNT_NOT_FOUND",
+        "message": "The specified funding_account value was not present in the From Account dropdown. The account may not exist or may not be eligible for this loan type."
+      },
+      "action": "extract",
+      "target": {
+        "description": "From Account dropdown options",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "From account #:||td:nth-child(2) select",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"From account #:\") + td select",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          },
+          {
+            "strategy": "css",
+            "value": "#fromAccountId",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "output": "available_accounts",
+      "parse": "text"
+    },
+    {
+      "id": "s06_extract",
+      "description": "Loan application status cell",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Loan Request Processed",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "loan_processing_error",
+          "when": {
+            "kind": "text_visible",
+            "value": "Error processing loan",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "The bank's loan processing system returned an error. The application was not evaluated."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Loan application status cell",
+        "candidates": [
+          {
+            "strategy": "relative_text",
+            "value": "Down Payment: $||td:nth-child(2)",
+            "role": null,
+            "rationale": "row anchored by first cell text, for id-less legacy tables"
+          },
+          {
+            "strategy": "css",
+            "value": "td:has-text(\"Down Payment: $\") + td",
+            "role": null,
+            "rationale": "the cell immediately after its label cell; unlike the row-anchored rung this survives a column being inserted"
+          }
+        ]
+      },
+      "output": "loan_application_status",
+      "parse": "text"
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Page state proving success: This is a fixed page heading rendered by the application every time a loan application is successfully submitted and evaluated, regardless of whether the loan is approved or denied. It confirms the flow reached its goal — the application was processed — without depending on any variable data values like the status, provider name, date, or account numbers.",
+    "match": {
+      "kind": "text_visible",
+      "value": "Loan Request Processed",
+      "scope": null
+    }
+  }
+}

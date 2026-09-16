@@ -303,7 +303,16 @@ def harden(client, model: str, art: Artifact, goal: str, driver=None,
             art.business_outcomes.append(BusinessOutcomeDecl(
                 code=e["code"], description=e["message"]))
             declared.add(e["code"])
-        step.on_exhausted = OutcomeAction(code=e["code"], message=e["message"])
+        # The proposal is about an EMPTY result, so it belongs on `on_empty`.
+        # Writing it to `on_exhausted` conflated two different claims: "the
+        # results area is empty" (an answer) and "I could not find the results
+        # area at all" (a fault). An extract aimed at the wrong element then
+        # failed to resolve and was reported as "no transactions found" while
+        # the page showed sixteen.
+        if isinstance(step, ExtractStep):
+            step.on_empty = OutcomeAction(code=e["code"], message=e["message"])
+        else:
+            step.on_exhausted = OutcomeAction(code=e["code"], message=e["message"])
         applied.append(f"{step.id}: empty result now reports {e['code']}")
 
     # Rejections are stored ON the artifact, not just logged, so a reviewer

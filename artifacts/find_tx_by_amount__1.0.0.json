@@ -1,0 +1,427 @@
+{
+  "schema_version": "1.0",
+  "kind": "capability",
+  "id": "find_tx_by_amount",
+  "version": "1.0.0",
+  "name": "find_tx_by_amount",
+  "description": "Log in with the given username and password, open the Find Transactions page, select the given account in the Account dropdown, enter the amount in the Amount field, click the FIND TRANSACTIONS button in the amount section, and read the whole Transaction Results table into an output named transactions",
+  "app": "parabank",
+  "status": "draft",
+  "provenance": {
+    "recorded_at": "2026-09-16T00:27:58.219658Z",
+    "recorded_by": "discovery_agent",
+    "discovery_run_id": "discovery-20260916-002712-776420",
+    "model": "claude-sonnet-4-6",
+    "approved_plan": {
+      "goal": "Log in with the given username and password, open the Find Transactions page, select the given account in the Account dropdown, enter the amount in the Amount field, click the FIND TRANSACTIONS button in the amount section, and read the whole Transaction Results table into an output named transactions",
+      "steps": [
+        {
+          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
+          "action": "Replay reusable fragment parabank_login@1.0.0 with username and password",
+          "uses": [
+            "parabank_login@1.0.0"
+          ]
+        },
+        {
+          "intent": "Navigate to the Find Transactions page",
+          "action": "Locate and click the 'Find Transactions' link in the navigation/sidebar menu",
+          "uses": []
+        },
+        {
+          "intent": "Select the given account in the Account dropdown",
+          "action": "Find the Account dropdown on the Find Transactions page and select the option matching account_id",
+          "uses": []
+        },
+        {
+          "intent": "Enter the amount in the Amount field within the amount search section",
+          "action": "Locate the Amount input field in the amount search section and type the value of amount",
+          "uses": []
+        },
+        {
+          "intent": "Click the FIND TRANSACTIONS button associated with the amount section",
+          "action": "Click the 'Find Transactions' button that is in the amount search section to submit the query",
+          "uses": []
+        },
+        {
+          "intent": "Read the entire Transaction Results table into the output named transactions",
+          "action": "Capture all rows and columns of the Transaction Results table that appears after the search",
+          "uses": []
+        }
+      ],
+      "parameters": [
+        {
+          "name": "username",
+          "description": "The username used to log in to ParaBank",
+          "example": "john",
+          "sensitive": false
+        },
+        {
+          "name": "password",
+          "description": "The password used to log in to ParaBank",
+          "example": "",
+          "sensitive": true
+        },
+        {
+          "name": "account_id",
+          "description": "The account number to select in the Account dropdown on the Find Transactions page",
+          "example": "13344",
+          "sensitive": false
+        },
+        {
+          "name": "amount",
+          "description": "The transaction amount to search for in the Amount field",
+          "example": "100",
+          "sensitive": false
+        }
+      ],
+      "outputs": [
+        "transactions"
+      ],
+      "success_signal": "The Transaction Results table is visible on the Find Transactions page, showing a table header row with column labels (e.g. Date, Transaction, Debit, Credit)",
+      "reuse": [
+        "parabank_login@1.0.0"
+      ]
+    },
+    "plan_approved_by": "operator",
+    "verification_problems": [],
+    "hardening_rejected": [
+      "s06_extract: detector 'results_table_missing' rejected: 'Transaction Results' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
+    "partial_reason": null,
+    "smoke_replay": "skipped: state-changing steps",
+    "review_notes": [
+      "s03_select: only one locator candidate (css) — no fallback if it stops matching",
+      "s04_type: only one locator candidate (css) — no fallback if it stops matching",
+      "s06_extract: only one locator candidate (css) — no fallback if it stops matching"
+    ]
+  },
+  "inputs": [
+    {
+      "name": "username",
+      "type": "string",
+      "description": "The username used to log in to ParaBank",
+      "required": true,
+      "sensitive": false,
+      "example": "john"
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "description": "The account number to select in the Account dropdown on the Find Transactions page",
+      "required": true,
+      "sensitive": false,
+      "example": "13344"
+    },
+    {
+      "name": "amount",
+      "type": "string",
+      "description": "The transaction amount to search for in the Amount field",
+      "required": true,
+      "sensitive": false,
+      "example": "100"
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "description": "The password used to log in to ParaBank",
+      "required": true,
+      "sensitive": true,
+      "example": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "transactions",
+      "type": "string",
+      "description": "Read from the page during discovery; returned as text"
+    }
+  ],
+  "business_outcomes": [
+    {
+      "code": "NO_SUCH_ACCOUNT_ID",
+      "description": "The supplied account_id does not exist on this surface."
+    },
+    {
+      "code": "NO_TRANSACTIONS",
+      "description": "No transactions were present for the supplied inputs."
+    },
+    {
+      "code": "CREDENTIALS_REJECTED",
+      "description": "The supplied username/password combination was not accepted by ParaBank; login failed."
+    },
+    {
+      "code": "ACCOUNT_NOT_FOUND",
+      "description": "The requested account_id does not appear in the Account dropdown for this user."
+    },
+    {
+      "code": "NO_TRANSACTIONS_FOUND",
+      "description": "The account exists and the search succeeded, but no transactions match the given amount."
+    }
+  ],
+  "steps": [
+    {
+      "id": "s00_1_subflow",
+      "description": "replay proven fragment parabank_login@1.0.0",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "login_credentials_rejected",
+          "when": {
+            "kind": "text_visible",
+            "value": "The username and password could not be verified.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "CREDENTIALS_REJECTED",
+            "message": "Login failed: the supplied credentials were rejected by ParaBank."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "run_subflow",
+      "ref": "parabank_login@1.0.0",
+      "bind_inputs": {
+        "username": "{{username}}",
+        "password": "{{password}}"
+      }
+    },
+    {
+      "id": "s01_navigate",
+      "description": "Open entry page",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "app_unavailable",
+          "when": {
+            "kind": "text_visible",
+            "value": "HTTP Status 503",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank returned HTTP 503 — the application is unavailable. Aborting."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "navigate",
+      "url": "http://localhost:8080/parabank/index.htm"
+    },
+    {
+      "id": "s02_click",
+      "description": "Find Transactions link",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "url_matches",
+        "value": "/parabank/findtrans.htm",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "Find Transactions link",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "Find Transactions",
+            "role": "link",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "a[href*=\"findtrans.htm\"]",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s03_select",
+      "description": "Account dropdown",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [
+        {
+          "id": "account_not_in_dropdown",
+          "when": {
+            "kind": "text_visible",
+            "value": "No accounts found",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "ACCOUNT_NOT_FOUND",
+            "message": "Account dropdown contains no selectable accounts for this user."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "select",
+      "target": {
+        "description": "Account dropdown",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#accountId",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{account_id}}",
+      "on_value_absent": {
+        "type": "business_outcome",
+        "code": "NO_SUCH_ACCOUNT_ID",
+        "message": "The {{account_id}} supplied is not among the options offered here, so there is no such record to act on."
+      }
+    },
+    {
+      "id": "s04_type",
+      "description": "Amount input field in the amount search section",
+      "risk": "safe",
+      "wait_after": null,
+      "detectors": [],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "type",
+      "target": {
+        "description": "Amount input field in the amount search section",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#amount",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "value": "{{amount}}",
+      "sensitive": false
+    },
+    {
+      "id": "s05_click",
+      "description": "FIND TRANSACTIONS button in the amount section",
+      "risk": "risky",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Transaction Results",
+        "target": null,
+        "timeout_ms": 15000
+      },
+      "detectors": [
+        {
+          "id": "invalid_amount_format",
+          "when": {
+            "kind": "text_visible",
+            "value": "Please enter a valid amount.",
+            "scope": null
+          },
+          "then": {
+            "type": "hard_failure",
+            "message": "ParaBank rejected the amount value as invalid. Check that the 'amount' input is a positive numeric value."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "click",
+      "target": {
+        "description": "FIND TRANSACTIONS button in the amount section",
+        "candidates": [
+          {
+            "strategy": "role_name",
+            "value": "FIND TRANSACTIONS",
+            "role": "button",
+            "rationale": "accessible role and name, most stable across restyling"
+          },
+          {
+            "strategy": "css",
+            "value": "#findByAmount",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "s06_extract",
+      "description": "Transaction Results table",
+      "risk": "safe",
+      "wait_after": {
+        "kind": "text_visible",
+        "value": "Transaction Results",
+        "target": null,
+        "timeout_ms": 10000
+      },
+      "detectors": [
+        {
+          "id": "no_transactions_found",
+          "when": {
+            "kind": "text_visible",
+            "value": "No transactions found.",
+            "scope": null
+          },
+          "then": {
+            "type": "business_outcome",
+            "code": "NO_TRANSACTIONS_FOUND",
+            "message": "The search completed but no transactions match the given amount for this account."
+          }
+        }
+      ],
+      "on_exhausted": {
+        "type": "hard_failure",
+        "message": "step exhausted all candidates"
+      },
+      "action": "extract",
+      "target": {
+        "description": "Transaction Results table",
+        "candidates": [
+          {
+            "strategy": "css",
+            "value": "#transactionTable",
+            "role": null,
+            "rationale": "structural fallback"
+          }
+        ]
+      },
+      "output": "transactions",
+      "parse": "text",
+      "on_empty": {
+        "type": "business_outcome",
+        "code": "NO_TRANSACTIONS",
+        "message": "The page showed the transactions area with nothing in it, so there are none to report for these inputs. This is an answer, not a failure."
+      }
+    }
+  ],
+  "success": {
+    "id": "goal_proof",
+    "description": "Text the discovery model proved success with",
+    "match": {
+      "kind": "text_visible",
+      "value": "Transaction Results",
+      "scope": null
+    }
+  }
+}

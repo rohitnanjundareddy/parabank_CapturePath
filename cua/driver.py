@@ -93,6 +93,21 @@ class SurfaceDriver(Protocol):
     def close(self) -> None: ...
 
 
+class OptionNotFound(Exception):
+    """The control was found; the option the caller asked for is not in it.
+
+    Distinct from ElementNotFound on purpose. A dropdown that is missing is a
+    recording that no longer matches the page. A dropdown that is present but
+    does not list account 99999 is the surface answering the caller's
+    question: there is no such account. Only the first is a fault.
+    """
+    def __init__(self, target, value: str, available=None):
+        self.target, self.value = target, value
+        self.available = available or []
+        super().__init__(
+            f"'{value}' is not among the options for '{target.description}'")
+
+
 class ElementNotFound(Exception):
     def __init__(self, target: Target, tried: list[LocatorCandidate],
                  unusable: Optional[list[str]] = None):
@@ -125,6 +140,14 @@ class PlaywrightDriver:
         self._controller = Controller.AUTOMATION
         self._human_actions: list[dict] = []
         self._recording_hooks_installed = False
+        # Refs are only meaningful within the observation that minted
+        # them, so each observation stamps its own generation into
+        # them. Without this every observation numbers elements e0..eN
+        # and a ref carried over from an earlier turn silently resolves
+        # to whatever now sits at that number -- which is how an
+        # extract meant for the results table was recorded against a
+        # dropdown, a date box and a nav link on three separate runs.
+        self._observation_seq = 0
 
     def fresh_session(self) -> "PlaywrightDriver":
         """A second, cookie-isolated session on the SAME browser.
@@ -153,8 +176,18 @@ class PlaywrightDriver:
         elements: list[ObservedElement] = []
         # Interactable elements plus headings/cells that carry state. This is
         # a *digest* for the LLM, not a DOM dump: role, name, value, position.
+        self._observation_seq += 1
         js = """
-        () => {
+        (GEN) => {
+          // Clear the previous generation's stamps first. An element that is
+          // not re-enumerated this time -- hidden, replaced, scrolled out of
+          // layout -- would otherwise keep its old ref and still resolve, so
+          // a stale ref would quietly succeed against the wrong element. With
+          // the stamps cleared, a ref from a past observation matches nothing
+          // and fails loudly, which is the only safe way for it to fail.
+          for (const old of document.querySelectorAll('[data-cua-ref]')) {
+            old.removeAttribute('data-cua-ref');
+          }
           // `table` is here so a COLLECTION is addressable, not just its
           // individual cells: without it the only readable units are single
           // <td>s, and a goal like "read the transactions" has no element
@@ -178,23 +211,36 @@ class PlaywrightDriver:
             if (r.width === 0 || r.height === 0) continue;
             if (el.tagName === 'TABLE' && !isDataTable(el)) continue;
             const label = el.labels && el.labels[0] ? el.labels[0].innerText : '';
+            // A <select>'s innerText is every option concatenated, and its
+            // value is whichever one is currently chosen. Neither names the
+            // control, and naming it that way is actively harmful here: an
+            // account dropdown renders in the digest as a long multi-line
+            // block of numbers, which is exactly what a results table looks
+            // like. The agent then "reads the transactions" off the dropdown
+            // and records a locator pointing at it. Name it by its label,
+            // and let `role` and `value` carry what it is and what is picked.
+            // (The same rule already governs locator naming; it belonged in
+            // both places.)
+            const isSelect = el.tagName === 'SELECT';
+            const text = isSelect ? '' : el.innerText;
+            const fallback = isSelect ? (el.name || el.id || 'dropdown')
+                                      : (el.value || el.placeholder || '');
             const name = (el.getAttribute('aria-label') || label ||
-                          el.innerText || el.value || el.placeholder || '')
-                          .trim().slice(0, 80);
+                          text || fallback || '').trim().slice(0, 80);
             out.push({
-              ref: 'e' + (i++),
+              ref: GEN + 'e' + (i++),
               role: el.getAttribute('role') || el.tagName.toLowerCase(),
               name: name,
               tag: el.tagName.toLowerCase(),
               value: el.value !== undefined ? String(el.value).slice(0, 80) : null,
               bounds: [r.x, r.y, r.width, r.height],
             });
-            el.setAttribute('data-cua-ref', 'e' + (i - 1));
+            el.setAttribute('data-cua-ref', GEN + 'e' + (i - 1));
           }
           return out;
         }
         """
-        for raw in self._page.evaluate(js):
+        for raw in self._page.evaluate(js, f"o{self._observation_seq}"):
             elements.append(ObservedElement(**raw))
         shot = None
         if screenshot_to:
@@ -375,12 +421,54 @@ class PlaywrightDriver:
         # A legacy <select> commonly posts back from onchange, so this waits
         # too — the gap that made a dropdown look like it had done nothing.
         before = self.page_signature()
-        loc.select_option(label=value)
+        try:
+            loc.select_option(label=value)
+        except Exception as exc:
+            # The control resolved, so this is not a targeting failure. Either
+            # the option is absent -- an answer about the caller's data -- or
+            # something else went wrong, which is still a fault. Only claim
+            # the first when the option really is not on the list.
+            options = loc.evaluate(
+                "el => Array.from(el.options || []).map(o => o.label.trim())")
+            if value not in options:
+                raise OptionNotFound(target, value, options) from exc
+            raise
         self.after_action(before)
         return strat
 
     def read_text(self, target: Target) -> tuple[str, LocatorStrategy]:
         loc, strat = self._resolve(target)
+        # The same refusal discovery gets, for the same reason. This is the
+        # path an already-recorded artifact takes, so an extract that was
+        # aimed at a picker keeps returning its option list -- non-empty, it
+        # parses, it looks like a collection -- and replay reports success.
+        # A caller receiving a list of account numbers labelled "transactions"
+        # is worse off than one receiving an error.
+        tag = loc.evaluate("el => el.tagName")
+        if tag == "SELECT":
+            chosen = loc.evaluate(
+                "el => (el.selectedOptions[0] || {}).label || ''").strip()
+            raise NotReadableAsData(
+                f"'{target.description}' resolves to a dropdown, so this "
+                f"capability is reading a list of choices and calling it "
+                f"data (currently {chosen!r} is selected). The recording "
+                f"points at the wrong element and needs to be re-recorded.")
+        if tag in ("INPUT", "TEXTAREA"):
+            # A form field holds what someone typed, not what the page
+            # produced. Reading one is legitimate (a pre-filled profile
+            # field), so a value is returned -- but inner_text() on an input
+            # is ALWAYS empty, which is how an extract aimed at a date box
+            # read "" and got reported as "no transactions found" while
+            # sixteen rows sat on screen. An empty field is a blank box, and
+            # a blank box is never a result.
+            value = loc.input_value().strip()
+            if not value:
+                raise NotReadableAsData(
+                    f"'{target.description}' resolves to an empty form field, "
+                    f"not to a result. A blank input means nobody typed in it, "
+                    f"not that the page found nothing. The recording points at "
+                    f"the wrong element and needs to be re-recorded.")
+            return (value, strat)
         return (loc.inner_text().strip(), strat)
 
     def press(self, key: str) -> None:
@@ -435,29 +523,51 @@ class PlaywrightDriver:
     # -- session ownership (human handoff) ----------------------------------
 
     def cede_control(self) -> None:
-        """Hand the live page to a human. Hooks are installed as an init
-        script so they survive the human navigating between pages."""
+        """Hand the live page to a human.
+
+        The listeners record the same element properties the agent's own
+        actions record, through the one shared description in
+        `_ELEMENT_INFO_JS`, so a step recovered by a person can be turned into
+        a real locator ladder rather than a note. Properties are captured in
+        the handler, while the element is still on the page: by the time the
+        human says they are finished, the page has usually moved on.
+
+        Hooks are installed as an init script so they survive the human
+        navigating between pages.
+        """
         if not self._recording_hooks_installed:
             self._page.expose_function(
                 "_cuaRecord", lambda ev: self._human_actions.append(ev)
             )
             hook_js = """
                 () => {
-                  document.addEventListener('click', e => {
+                  const describe = __ELEMENT_INFO__;
+                  const record = (type, e, extra) => {
                     const t = e.target;
-                    window._cuaRecord({type:'click', ts: Date.now(),
-                      page: location.pathname,
+                    let info = null;
+                    try { info = describe(t); } catch (err) { info = null; }
+                    window._cuaRecord(Object.assign({
+                      type: type, ts: Date.now(), page: location.pathname,
                       desc: (t.innerText || t.value || t.name || t.tagName)
-                            .trim().slice(0,60)});
-                  }, true);
+                            .trim().slice(0,60),
+                      info: info,
+                    }, extra || {}));
+                  };
+                  document.addEventListener('click', e => record('click', e), true);
                   document.addEventListener('change', e => {
                     const t = e.target;
-                    window._cuaRecord({type:'change', ts: Date.now(),
-                      page: location.pathname,
-                      desc: (t.name || t.id || t.tagName).slice(0,60)});
+                    // What a person typed or chose is DATA. It is carried so
+                    // the recorder can match it against a supplied parameter
+                    // and store a placeholder; it is never used to name the
+                    // element, for the same reason `value` is not a locator.
+                    const isPassword = t.type === 'password';
+                    record(t.tagName === 'SELECT' ? 'select' : 'type', e, {
+                      value: isPassword ? null : String(t.value || '').slice(0, 200),
+                      sensitive: isPassword,
+                    });
                   }, true);
                 }
-            """
+            """.replace("__ELEMENT_INFO__", _ELEMENT_INFO_JS)
             self._page.add_init_script(f"({hook_js})()")   # future navigations
             self._page.evaluate(hook_js)                    # current page, now
             self._recording_hooks_installed = True
@@ -506,9 +616,34 @@ def _select_ref(self, ref: str, value: str) -> None:
     self._ref_locator(ref).select_option(label=value)
     self.after_action(before)
 
+class NotReadableAsData(Exception):
+    """This control holds choices, not results.
+
+    Reading a <select> gives every option concatenated. It looks like tabular
+    data and is nothing of the sort: an account dropdown reads back as a long
+    list of account numbers, which is exactly what a transaction table looks
+    like from a distance. Recording that produces a capability whose "read the
+    transactions" step returns the contents of a picker, reports success, and
+    is wrong in a way no downstream check catches -- the value is non-empty,
+    it parses, and it even looks like a collection.
+
+    Failing here instead makes the mistake visible while the agent can still
+    choose something else.
+    """
+
+
 def _read_ref(self, ref: str) -> str:
     loc = self._ref_locator(ref)
-    txt = loc.inner_text() if loc.evaluate("el => el.tagName") != "INPUT" else loc.input_value()
+    tag = loc.evaluate("el => el.tagName")
+    if tag == "SELECT":
+        chosen = loc.evaluate(
+            "el => (el.selectedOptions[0] || {}).label || ''").strip()
+        raise NotReadableAsData(
+            f"that is a dropdown, not a result. Its options are the choices "
+            f"available, not data read off the page (it currently has "
+            f"{chosen!r} selected). If you want what the page produced, read "
+            f"the results area instead.")
+    txt = loc.inner_text() if tag != "INPUT" else loc.input_value()
     return txt.strip()
 
 def _submits_ref(self, ref: str) -> bool:
@@ -553,15 +688,11 @@ def _submits_ref(self, ref: str) -> bool:
         return False
 
 
-def _candidates_for_ref(self, ref: str, description: str):
-    """Inspect a live element and build the targeting ladder for the artifact:
-    accessible role+name first, then label, then text/placeholder, then a
-    structural CSS fallback. Captured at action time, before the page moves on.
-    """
-    from .schemas import LocatorCandidate, LocatorStrategy, Target
-
-    info = self._ref_locator(ref).evaluate(
-        """
+#: One description of how to read an element, used by BOTH paths that record
+#: one: the agent pointing at a ref, and a human clicking during a handoff.
+#: Kept as a single constant because a second copy would drift, and the two
+#: would then disagree about what the same element is called.
+_ELEMENT_INFO_JS = """
         el => {
           const roleMap = {A:'link', BUTTON:'button', SELECT:'combobox',
                            TEXTAREA:'textbox'};
@@ -632,7 +763,17 @@ def _candidates_for_ref(self, ref: str, description: str):
           };
         }
         """
-    )
+
+
+def _target_from_info(info: dict, description: str):
+    """Turn the element properties above into the artifact's locator ladder.
+
+    Pure: it takes a dict and returns a Target, so it works just as well for
+    an element inspected live as for one whose properties were captured at
+    the moment a human clicked it and shipped back afterwards.
+    """
+    from .schemas import LocatorCandidate, LocatorStrategy, Target
+
     cands = []
     if info["role"] and info["name"]:
         cands.append(LocatorCandidate(
@@ -670,6 +811,15 @@ def _candidates_for_ref(self, ref: str, description: str):
             strategy=LocatorStrategy.TEXT, value=info["name"],
             rationale="visible text, last resort"))
     return Target(description=description, candidates=cands)
+
+
+def _candidates_for_ref(self, ref: str, description: str):
+    """Inspect a live element and build the targeting ladder for the artifact:
+    accessible role+name first, then label, then text/placeholder, then a
+    structural CSS fallback. Captured at action time, before the page moves on.
+    """
+    return _target_from_info(
+        self._ref_locator(ref).evaluate(_ELEMENT_INFO_JS), description)
 
 
 # How long to wait for an action to START changing the page, how long to

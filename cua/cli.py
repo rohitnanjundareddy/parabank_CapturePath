@@ -82,6 +82,39 @@ def _kv(pairs: list[str]) -> dict[str, str]:
     return out
 
 
+def _show_outputs(outputs: dict, redactor) -> None:
+    """Print what the run actually READ, not just that it succeeded.
+
+    A recording is judged on whether its extracts point at the data or at the
+    furniture around it, and that is invisible from "SUCCESS in 8 steps". Five
+    of the artifacts in this repo read a page heading or a dropdown and
+    reported success; every one of them would have been obvious here. Replay
+    reads the same elements, so this is the moment to notice.
+
+    Values go through the redactor first: an output is a reading off a bank
+    page, and the terminal is somewhere it gets persisted.
+    """
+    typer.echo("\nRead from the page:")
+    if not outputs:
+        # Silence here reads as "nothing to report" when it actually means
+        # "no extract produced a value" -- a capability that declares an
+        # output and never fills it. Say so.
+        typer.echo("  (nothing) - no extract step produced a value, so any "
+                   "declared output is empty.")
+        return
+    width = max(len(k) for k in outputs)
+    for name, value in outputs.items():
+        text = redactor.scrub(str(value))
+        shown = " ".join(text.split())
+        if len(shown) > 120:
+            shown = shown[:120] + "..."
+        size = f"  ({len(text)} chars)" if len(text) > 120 else ""
+        typer.echo(f"  {name:<{width}} = {shown!r}{size}")
+    typer.echo("  Check these are the values you asked for and not a heading "
+               "or a dropdown;")
+    typer.echo("  replay will read the same elements.")
+
+
 @app.command()
 def discover(
     goal: str,
@@ -260,6 +293,36 @@ def discover(
             typer.echo("\nDiscovery did not succeed.")
             if outcome.failure_reason:
                 typer.echo(f"\n{outcome.failure_reason}")
+            _show_outputs(outcome.outputs, redactor)
+
+            # Keep the path it DID explore, as a draft. The run answered the
+            # caller's question -- "that account is not there" -- and the
+            # steps it took getting to that answer are worth reviewing and
+            # replaying. It is never auto-approved and never smoke-tested:
+            # a partial has not reached its goal, so there is nothing to
+            # prove, and `partial_reason` on the artifact says so plainly.
+            if outcome.transcript:
+                why = outcome.failure_reason or "the goal was not reached"
+                try:
+                    partial = record(
+                        outcome, artifact_id=artifact_id,
+                        name=name or artifact_id, description=goal,
+                        app=app_name, goal=goal, entry_url=url,
+                        params=params, secrets=secrets,
+                        run_id=ev.run_id, model=model, plan=approved_plan,
+                        kind=(ArtifactKind.FRAGMENT if kind == "fragment"
+                              else ArtifactKind.CAPABILITY),
+                        prefix_subflows=prefix_subflows,
+                        partial_reason=why.split(chr(10))[0][:200])
+                    path = ArtifactStore().save(partial)
+                    typer.echo(f"\nPartial recording saved as a DRAFT: {path}")
+                    typer.echo(f"  {len(partial.steps)} step(s) reached. Replay it "
+                               f"with --allow-draft to see how far the path gets, "
+                               f"then finish or discard it.")
+                except Exception as exc:
+                    ev.event("partial_not_recorded", error=str(exc))
+                    typer.echo(f"\nNothing worth recording: {exc}")
+
             typer.echo(f"\nEvidence: {ev.dir}")
             raise typer.Exit(1)
 
@@ -370,7 +433,11 @@ def discover(
                 try:
                     smoke_engine = ReplayEngine(
                         smoke_driver, PolicyEngine.from_yaml(policy),
-                        ArtifactStore(), smoke_ev, escalation=None)
+                        # No operator, and explicitly no handoff: this run is
+                        # the PROOF that the artifact replays by itself. An
+                        # artifact a human had to rescue has not been proved.
+                        ArtifactStore(), smoke_ev, escalation=None,
+                        escalate_on_failure=False)
                     res = smoke_engine.run(artifact.ref, {**params, **secrets},
                                            allow_draft=True)
                     smoke_ok = res.status.value != "hard_failure"
@@ -404,6 +471,7 @@ def discover(
                    f"({outcome.escalations} escalation(s)).")
         typer.echo(f"Artifact: {path}")
         typer.echo(f"Evidence: {ev.dir}")
+        _show_outputs(outcome.outputs, redactor)
         if artifact.provenance.review_notes:
             typer.echo("\nWorth a reviewer's eye:")
             for note in artifact.provenance.review_notes:
@@ -440,8 +508,10 @@ def replay(
     non_interactive: bool = typer.Option(False,
         help="No human available: risky steps fail instead of prompting"),
     escalate_on_failure: bool = typer.Option(
-        False, help="Ask the operator before giving up on an unanticipated "
-                    "runtime failure, instead of ending the run"),
+        True, "--escalate-on-failure/--no-escalate-on-failure",
+        help="When a step exhausts its retries and the artifact declared "
+             "nothing for that case, hand the browser to the operator before "
+             "giving up. On by default; never applies to --non-interactive."),
 ):
     """Deterministically replay an artifact. No LLM in the loop."""
     params = {**_kv(input), **_kv(secret)}

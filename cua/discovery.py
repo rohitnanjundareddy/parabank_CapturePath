@@ -76,6 +76,12 @@ class DiscoveryOutcome:
     steps_taken: int = 0
     escalations: int = 0
     failure_reason: Optional[str] = None
+    # A value the caller supplied that the surface does not have. This is a
+    # business outcome, not a failure to operate the page: no human can make
+    # account 13455 exist. Kept separately so the run can report it as such
+    # AND hardening can declare it on the artifact, so a later replay answers
+    # "not found" instead of failing.
+    not_found: Optional[dict] = None
     # Every page state this run passed through. The run SUCCEEDED, so text
     # that was on screen at any point during it cannot be evidence of
     # failure — which is what hardening needs in order to throw out a
@@ -284,8 +290,33 @@ TOOLS = [
         },
     },
     {
+        "name": "declare_not_found",
+        "description":
+            "A VALUE YOU WERE GIVEN is not present on this surface -- an "
+            "account number missing from a dropdown, a record the search "
+            "cannot find. Use this instead of declare_stuck whenever the "
+            "obstacle is absent DATA rather than a page you cannot operate: "
+            "'no such account' is a legitimate answer the caller needs, and "
+            "no human can make the missing record exist. Say which parameter "
+            "and what you could see instead.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "parameter": {"type": "string",
+                              "description": "the input whose value is absent"},
+                "observed": {"type": "string",
+                             "description": "what the surface offered instead"},
+            },
+            "required": ["parameter", "observed"],
+        },
+    },
+    {
         "name": "declare_stuck",
-        "description": "Give up safely and hand the live session to a human operator.",
+        "description":
+            "You cannot OPERATE this surface -- the path is unclear, a "
+            "control will not respond, something unexpected is in the way. "
+            "Hands the live session to a human operator. If the obstacle is "
+            "a value that simply is not there, use declare_not_found instead.",
         "input_schema": {
             "type": "object",
             "properties": {"reason": {"type": "string"}},
@@ -401,6 +432,46 @@ class DiscoveryAgent:
                            "if you cannot reach it.", is_error=True, extra=extra_results)
                 continue
 
+            if tool == "declare_not_found":
+                parameter = tool_args.get("parameter", "")
+                observed = tool_args.get("observed", "")
+                outcome.not_found = {"parameter": parameter, "observed": observed}
+                self.ev.event("not_found", parameter=parameter, observed=observed)
+                # Report it as the outcome it is, THEN offer the session. The
+                # answer is "not found" either way; the handoff is there
+                # because discovery is supervised authoring and the operator
+                # may want to carry on from a state only they can reach. What
+                # it must not do is masquerade as the agent being stuck.
+                refusal = self._why_not_escalate(f"not found: {parameter}")
+                if refusal:
+                    outcome.steps_taken = step
+                    outcome.failure_reason = (
+                        f"'{parameter}' was not found on this surface. "
+                        f"Observed instead: {observed}\n\n{refusal}")
+                    return outcome
+                outcome.escalations += 1
+                self._escalated_reasons.append(f"not found: {parameter}".lower())
+                note = self.escalation.intervene(
+                    context=(f"'{parameter}' is not present on this surface. "
+                             f"Observed instead: {observed}. This is a business "
+                             f"outcome, not a blocked page -- take the session "
+                             f"if you want to carry on from a state only you "
+                             f"can reach."),
+                    goal=goal, step=f"step {step}",
+                    driver=self.driver, evidence=self.ev)
+                rescued = self._transcribe_human_actions(
+                    getattr(self.escalation, "last_actions", None) or [])
+                outcome.transcript.extend(rescued)
+                self.ev.event("handoff_recorded", step=f"step {step}",
+                              steps_recovered=len(rescued))
+                self._reply(messages, call.id,
+                            f"Recorded that '{parameter}' is not present. A "
+                            f"human took control and reported: {note}. If the "
+                            f"goal is now reachable, continue; otherwise "
+                            f"declare_not_found again to end the run.",
+                            extra=extra_results)
+                continue
+
             if tool == "declare_stuck":
                 reason = tool_args.get("reason", "")
                 self.ev.event("stuck", reason=reason)
@@ -416,6 +487,15 @@ class DiscoveryAgent:
                 note = self.escalation.intervene(
                     context=reason, goal=goal, step=f"step {step}",
                     driver=self.driver, evidence=self.ev)
+                # What the person did becomes part of the recording. Without
+                # this a human-rescued run produces a capability that cannot
+                # replay the rescued part, and verification correctly refuses
+                # it -- the parameters they filled in by hand come back frozen.
+                rescued = self._transcribe_human_actions(
+                    getattr(self.escalation, "last_actions", None) or [])
+                outcome.transcript.extend(rescued)
+                self.ev.event("handoff_recorded", step=f"step {step}",
+                              steps_recovered=len(rescued))
                 self._reply(messages, call.id,
                            f"A human took control and reported: {note}. "
                            "Continue from the current page state.", extra=extra_results)
@@ -515,6 +595,51 @@ class DiscoveryAgent:
             {"type": "tool_result", "tool_use_id": tool_use_id, "content": content,
              "is_error": is_error},
         ]})
+
+    def _transcribe_human_actions(self, actions: list[dict]) -> list:
+        """Turn what a person did during a handoff into recordable steps.
+
+        The handoff listeners capture the same element properties the agent's
+        own actions capture, through the one shared description in the driver,
+        so these become real locator ladders rather than notes. That is what
+        lets a capability a human had to rescue replay WITHOUT them next time.
+
+        Anything the page could not describe is dropped: a step with no way to
+        find its element again is not a step, and recording it would trade an
+        honest refusal for a replay that fails somewhere less obvious.
+        """
+        from .driver import _target_from_info
+
+        entries = []
+        for action in actions:
+            info = action.get("info")
+            tool = {"click": "click", "type": "type",
+                    "select": "select"}.get(action.get("type"))
+            if tool is None or not info:
+                continue
+            if action.get("sensitive"):
+                # A password typed during a handoff is not recorded at all.
+                # Authentication belongs to the login fragment, and a secret
+                # has no business in a step even as a placeholder.
+                continue
+            description = (action.get("desc") or "").strip() or                 f"{tool} performed by the operator"
+            try:
+                target = _target_from_info(info, description)
+            except Exception:
+                # The schema requires at least one locator candidate, so an
+                # element the page could describe no other way raises here.
+                # Dropping it is right, but it must not take the run down
+                # with it: the rest of the handoff is still worth recording.
+                self.ev.event("handoff_action_dropped", description=description)
+                continue
+            args = {}
+            if tool == "type":
+                args["text"] = action.get("value") or ""
+            elif tool == "select":
+                args["value"] = action.get("value") or ""
+            entries.append(TranscriptEntry(
+                tool, args, description=description, target=target, ok=True))
+        return entries
 
     def _why_not_escalate(self, reason: str) -> Optional[str]:
         """Should a human be pulled into this? Returns why not, or None.
@@ -626,6 +751,23 @@ class DiscoveryAgent:
         # submitting a loan application, not that we notice afterwards. The
         # same structural test the recorder uses, applied live.
         ref = args.get("ref")
+        # Refs are re-stamped onto the DOM on EVERY observation, so a ref from
+        # an earlier turn is not stale-but-harmless: it silently addresses
+        # whatever element now happens to carry that number. That is how an
+        # extract the model described as "Transaction results table" ended up
+        # recorded against the account dropdown, and nothing downstream could
+        # tell, because the description came from the model and the locator
+        # came from the element.
+        if ref and before is not None:
+            live = {el.ref for el in before.elements}
+            if ref not in live:
+                self.ev.event("stale_ref", tool=tool, ref=ref,
+                              description=description)
+                return (f"'{ref}' is not in the latest observation. Refs are "
+                        f"reassigned every time the page is observed, so a ref "
+                        f"from an earlier turn now points somewhere else. Look "
+                        f"at the current observation and use a ref from it."), None
+
         submits = bool(
             tool == "click" and ref
             and getattr(self.driver, "submits_ref", lambda r: False)(ref))
@@ -710,6 +852,11 @@ class DiscoveryAgent:
                                 appeared_text=appeared_text,
                                 submits=submits)
         if tool == "extract":
-            self.ev.event("extracted", output=args.get("output"))
+            # The VALUE, not just the output name. Replay logs what it read and
+            # discovery did not, which is why an extract pointed at a page
+            # heading was invisible until someone replayed the artifact. The
+            # redactor runs first: this is a reading off a bank page.
+            self.ev.event("extracted", output=args.get("output"),
+                          source_text=self.redactor.scrub(str(extracted))[:500])
             return f"read: {extracted!r}", entry
         return "ok", entry

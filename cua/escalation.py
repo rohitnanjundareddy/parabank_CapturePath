@@ -19,6 +19,10 @@ from . import prompt
 class EscalationController:
     def __init__(self, interactive: bool = True):
         self.interactive = interactive
+        # What the human actually did during the last handoff. The note says
+        # what they meant; this is what the page saw. Kept here rather than
+        # returned so the signature stays a string for existing callers.
+        self.last_actions: list[dict] = []
 
     def intervene(self, *, context: str, goal: str, step: str,
                   driver, evidence) -> str:
@@ -48,6 +52,7 @@ class EscalationController:
             note = "non-interactive mode: auto-resumed"
 
         human_actions = driver.drain_human_actions()
+        self.last_actions = human_actions
         driver.resume_control()
         evidence.event("control_transferred", to="automation",
                        human_note=note, human_actions=human_actions)
