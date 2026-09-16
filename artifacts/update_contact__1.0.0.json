@@ -6,7 +6,7 @@
   "name": "update_contact",
   "description": "Log in with the given username and password, open the Update Contact Info page, replace the phone number with the given phone number and the city with the given city, click Update Profile, and read the confirmation message into an output named confirmation",
   "app": "parabank",
-  "status": "draft",
+  "status": "approved",
   "provenance": {
     "recorded_at": "2026-09-16T00:53:45.616980Z",
     "recorded_by": "discovery_agent",

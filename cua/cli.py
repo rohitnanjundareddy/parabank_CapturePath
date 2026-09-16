@@ -663,7 +663,7 @@ def chat(
     arguments; the deterministic replay engine does the work."""
     _resolve_api_key(api_key)
     import anthropic
-    from .chat import (SYSTEM, CapabilityChat, capability_tools,
+    from .chat import (SYSTEM, CapabilityChat, capability_tools, with_today,
                        describe_catalog, invocable)
 
     if not _ensure_app_running(url, start_app):
@@ -713,7 +713,7 @@ def chat(
             # bounded so a confused model cannot loop on the bank forever.
             for _ in range(6):
                 resp = client.messages.create(
-                    model=model, max_tokens=1200, system=SYSTEM,
+                    model=model, max_tokens=1200, system=with_today(SYSTEM),
                     tools=tools, messages=messages)
                 messages.append({"role": "assistant", "content": resp.content})
                 calls = [b for b in resp.content if b.type == "tool_use"]

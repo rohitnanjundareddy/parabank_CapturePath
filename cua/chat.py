@@ -55,6 +55,25 @@ Rules:
    carries the exact source text it was read from.
 6. Be brief. A sentence or two, unless asked for detail."""
 
+def with_today(prompt: str) -> str:
+    """Append today's date to a system prompt, computed at call time.
+
+    A model has no clock. Asked for "this year's transactions", it resolves
+    the year from its training data, which is a year or more behind, and
+    passes a confidently wrong date range to a capability that then returns a
+    confidently wrong answer. Stating the date turns that into arithmetic.
+
+    Computed per request, not at import: a UI server left running overnight
+    would otherwise tell the model it is still yesterday.
+    """
+    from datetime import date
+    today = date.today()
+    return (prompt + f"\n\nToday's date is {today.isoformat()} "
+            f"({today.strftime('%A')}). Resolve relative dates such as "
+            f"'this year', 'last month' or 'year to date' against it, and pass "
+            f"dates in the format each capability's input description asks for.")
+
+
 _JSON_TYPE = {ParamType.STRING: "string", ParamType.NUMBER: "number",
               ParamType.BOOLEAN: "boolean"}
 _PLACEHOLDER = re.compile(r"\{\{(\w+)\}\}")

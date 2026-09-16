@@ -6,7 +6,7 @@
   "name": "open_savings_account",
   "description": "Log in with the given username and password, open the Open New Account page, choose SAVINGS in the account type dropdown, select the given account as the funding account, click Open New Account, and read the new account number shown on the 'Your new account number' line of the confirmation page into an output named new_account_id",
   "app": "parabank",
-  "status": "draft",
+  "status": "approved",
   "provenance": {
     "recorded_at": "2026-09-15T22:06:28.086067Z",
     "recorded_by": "discovery_agent",

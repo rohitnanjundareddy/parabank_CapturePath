@@ -6,25 +6,25 @@
   "name": "tx_by_date_range",
   "description": "Log in with the given username and password, open the Find Transactions page, select the given account in the Account dropdown, enter the start date in the From date field and the end date in the To date field, click the FIND TRANSACTIONS button in the date range section, and read the whole Transaction Results table into an output named transactions",
   "app": "parabank",
-  "status": "draft",
+  "status": "approved",
   "provenance": {
-    "recorded_at": "2026-09-15T19:11:24.064548Z",
+    "recorded_at": "2026-09-16T18:29:22.392774Z",
     "recorded_by": "discovery_agent",
-    "discovery_run_id": "discovery-20260915-191040-98dc99",
+    "discovery_run_id": "discovery-20260916-182817-a7fa87",
     "model": "claude-sonnet-4-6",
     "approved_plan": {
       "goal": "Log in with the given username and password, open the Find Transactions page, select the given account in the Account dropdown, enter the start date in the From date field and the end date in the To date field, click the FIND TRANSACTIONS button in the date range section, and read the whole Transaction Results table into an output named transactions",
       "steps": [
         {
-          "intent": "Log in with the supplied credentials and reach the Accounts Overview page",
-          "action": "Replay parabank_login@1.0.0 using username and password parameters",
+          "intent": "Log in with the supplied username and password and reach the Accounts Overview page",
+          "action": "Replay reusable fragment parabank_login@1.0.0 using the supplied username and password",
           "uses": [
             "parabank_login@1.0.0"
           ]
         },
         {
           "intent": "Navigate to the Find Transactions page",
-          "action": "Locate and click the 'Find Transactions' link in the navigation menu",
+          "action": "Locate and click the 'Find Transactions' link in the navigation or sidebar menu",
           "uses": []
         },
         {
@@ -44,12 +44,12 @@
         },
         {
           "intent": "Click the FIND TRANSACTIONS button in the date range section",
-          "action": "Locate and click the FIND TRANSACTIONS button associated with the date range section",
+          "action": "Locate and click the FIND TRANSACTIONS button that is associated with the date range section",
           "uses": []
         },
         {
           "intent": "Read the entire Transaction Results table into the transactions output",
-          "action": "Extract all rows and columns from the Transaction Results table that appears after the search",
+          "action": "Capture all rows and columns of the Transaction Results table that appears after the search and store as the transactions output",
           "uses": []
         }
       ],
@@ -74,13 +74,13 @@
         },
         {
           "name": "start_date",
-          "description": "The start date to enter in the From date field (date range search), formatted as MM-DD-YYYY",
+          "description": "The start date to enter in the From date field (MM-DD-YYYY format)",
           "example": "01-01-2026",
           "sensitive": false
         },
         {
           "name": "end_date",
-          "description": "The end date to enter in the To date field (date range search), formatted as MM-DD-YYYY",
+          "description": "The end date to enter in the To date field (MM-DD-YYYY format)",
           "example": "12-31-2026",
           "sensitive": false
         }
@@ -88,14 +88,16 @@
       "outputs": [
         "transactions"
       ],
-      "success_signal": "The Transaction Results table is visible on the page after clicking FIND TRANSACTIONS, with a table heading or label such as \"Transaction Results\" displayed",
+      "success_signal": "The Transaction Results table is visible on the page after clicking the FIND TRANSACTIONS button in the date range section",
       "reuse": [
         "parabank_login@1.0.0"
       ]
     },
     "plan_approved_by": "operator",
     "verification_problems": [],
-    "hardening_rejected": [],
+    "hardening_rejected": [
+      "s07_extract: detector 'transaction_results_table_missing' rejected: 'Transaction Results' is visible on the page the run just succeeded on, so it can never distinguish that outcome from a genuine one"
+    ],
     "partial_reason": null,
     "smoke_replay": "skipped: state-changing steps",
     "review_notes": [
@@ -125,7 +127,7 @@
     {
       "name": "start_date",
       "type": "string",
-      "description": "The start date to enter in the From date field (date range search), formatted as MM-DD-YYYY",
+      "description": "The start date to enter in the From date field (MM-DD-YYYY format)",
       "required": true,
       "sensitive": false,
       "example": "01-01-2026"
@@ -133,7 +135,7 @@
     {
       "name": "end_date",
       "type": "string",
-      "description": "The end date to enter in the To date field (date range search), formatted as MM-DD-YYYY",
+      "description": "The end date to enter in the To date field (MM-DD-YYYY format)",
       "required": true,
       "sensitive": false,
       "example": "12-31-2026"
@@ -165,7 +167,7 @@
     },
     {
       "code": "CREDENTIALS_REJECTED",
-      "description": "The supplied username/password combination was not accepted by ParaBank and login failed."
+      "description": "The username/password combination was not accepted by ParaBank; login failed."
     },
     {
       "code": "ACCOUNT_NOT_FOUND",
@@ -173,7 +175,7 @@
     },
     {
       "code": "NO_TRANSACTIONS_FOUND",
-      "description": "The search completed successfully but no transactions exist for the given account and date range."
+      "description": "The account exists and the date range is valid, but no transactions fall within the specified period."
     }
   ],
   "steps": [
@@ -193,7 +195,7 @@
           "then": {
             "type": "business_outcome",
             "code": "CREDENTIALS_REJECTED",
-            "message": "Login failed: the supplied username or password was rejected by ParaBank."
+            "message": "ParaBank rejected the supplied username/password. Verify credentials and retry."
           }
         },
         {
@@ -205,7 +207,7 @@
           },
           "then": {
             "type": "hard_failure",
-            "message": "An unexpected error banner appeared on the login page; the application may be misconfigured or unavailable."
+            "message": "An unexpected error banner appeared on the login page. Inspect the page for details."
           }
         }
       ],
@@ -225,20 +227,7 @@
       "description": "Open entry page",
       "risk": "safe",
       "wait_after": null,
-      "detectors": [
-        {
-          "id": "app_unavailable",
-          "when": {
-            "kind": "text_visible",
-            "value": "503",
-            "scope": null
-          },
-          "then": {
-            "type": "hard_failure",
-            "message": "ParaBank returned an HTTP 503 — the application is not reachable. Check that the server is running on localhost:8080."
-          }
-        }
-      ],
+      "detectors": [],
       "on_exhausted": {
         "type": "hard_failure",
         "message": "step exhausted all candidates"
@@ -296,7 +285,7 @@
           "then": {
             "type": "business_outcome",
             "code": "ACCOUNT_NOT_FOUND",
-            "message": "The requested account_id was not present in the Account dropdown; it may not belong to this user."
+            "message": "The requested account_id was not present in the Account dropdown. The account may not belong to this user or may not exist."
           }
         }
       ],
@@ -325,7 +314,7 @@
     },
     {
       "id": "s04_type",
-      "description": "From date field in the date range section",
+      "description": "From date field in date range section",
       "risk": "safe",
       "wait_after": null,
       "detectors": [],
@@ -335,7 +324,7 @@
       },
       "action": "type",
       "target": {
-        "description": "From date field in the date range section",
+        "description": "From date field in date range section",
         "candidates": [
           {
             "strategy": "css",
@@ -350,7 +339,7 @@
     },
     {
       "id": "s05_type",
-      "description": "To date field in the date range section",
+      "description": "To date field in date range section",
       "risk": "safe",
       "wait_after": null,
       "detectors": [],
@@ -360,7 +349,7 @@
       },
       "action": "type",
       "target": {
-        "description": "To date field in the date range section",
+        "description": "To date field in date range section",
         "candidates": [
           {
             "strategy": "css",
@@ -393,7 +382,7 @@
           },
           "then": {
             "type": "hard_failure",
-            "message": "ParaBank rejected one or both date values as invalid. Verify that start_date and end_date are supplied in the expected MM-DD-YYYY format."
+            "message": "ParaBank rejected the supplied date value. Ensure start_date and end_date are in the format MM-DD-YYYY."
           }
         }
       ],
@@ -441,19 +430,7 @@
           "then": {
             "type": "business_outcome",
             "code": "NO_TRANSACTIONS_FOUND",
-            "message": "The search returned no transactions for the given account and date range."
-          }
-        },
-        {
-          "id": "internal_error_on_results",
-          "when": {
-            "kind": "text_visible",
-            "value": "An internal error has occurred",
-            "scope": null
-          },
-          "then": {
-            "type": "hard_failure",
-            "message": "ParaBank reported an internal error while retrieving transaction results. Check application logs for details."
+            "message": "The search completed successfully but returned no transactions for the given account and date range."
           }
         }
       ],
@@ -467,7 +444,7 @@
         "candidates": [
           {
             "strategy": "css",
-            "value": "#accountId",
+            "value": "#transactionTable",
             "role": null,
             "rationale": "structural fallback"
           }

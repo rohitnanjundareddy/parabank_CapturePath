@@ -6,7 +6,7 @@
   "name": "find_tx_by_amount",
   "description": "Log in with the given username and password, open the Find Transactions page, select the given account in the Account dropdown, enter the amount in the Amount field, click the FIND TRANSACTIONS button in the amount section, and read the whole Transaction Results table into an output named transactions",
   "app": "parabank",
-  "status": "draft",
+  "status": "approved",
   "provenance": {
     "recorded_at": "2026-09-16T00:27:58.219658Z",
     "recorded_by": "discovery_agent",

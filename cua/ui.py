@@ -29,7 +29,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 from . import prompt
-from .chat import SYSTEM, CapabilityChat, capability_tools, describe_catalog, invocable
+from .chat import SYSTEM, CapabilityChat, capability_tools, describe_catalog, invocable, with_today
 from .store import ArtifactStore
 
 HELD = frozenset({"username", "password"})
@@ -394,7 +394,7 @@ def _turn(session: Session, said: str, client, model: str,
         session.messages.append({"role": "user", "content": said})
         for _ in range(8):
             resp = client.messages.create(model=model, max_tokens=1500,
-                                          system=UI_SYSTEM, tools=tools,
+                                          system=with_today(UI_SYSTEM), tools=tools,
                                           messages=session.messages)
             session.messages.append({"role": "assistant", "content": resp.content})
             for b in resp.content:
